@@ -4,16 +4,20 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { PLANS, PLANS_USD } from "@/lib/billing/plans";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
-import { Music } from "lucide-react";
+import { Music, LayoutDashboard } from "lucide-react";
+import { auth } from "@/lib/auth";
 
-export default function Home() {
+export default async function Home() {
+  const session = await auth();
+  const isSignedIn = !!session?.user;
+
   const freePlan = PLANS.free;
   const starterPlan = PLANS.starter;
   const proPlan = PLANS.pro;
 
   return (
     <div className="min-h-screen">
-      {/* Header with theme toggle */}
+      {/* Header with theme toggle and auth awareness */}
       <header className="border-b bg-card/50 backdrop-blur-md sticky top-0 z-40">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <div className="flex items-center gap-2">
@@ -25,19 +29,46 @@ export default function Home() {
           </div>
           <div className="flex gap-2 items-center">
             <ThemeToggle />
-            <Link href="/login">
-              <Button variant="ghost" size="default">Login</Button>
-            </Link>
-            <Link href="/login">
-              <Button size="default">Get Started</Button>
-            </Link>
+            {isSignedIn ? (
+              <>
+                <div className="hidden sm:flex items-center gap-2 text-sm mr-2">
+                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium">
+                    {(session.user?.name || session.user?.email || "U")[0].toUpperCase()}
+                  </div>
+                  <span className="hidden md:inline truncate max-w-[150px]">{session.user?.name || session.user?.email}</span>
+                </div>
+                <Link href="/dashboard">
+                  <Button variant="default" size="default" className="gap-2">
+                    <LayoutDashboard className="w-4 h-4" aria-hidden="true" />
+                    Dashboard
+                  </Button>
+                </Link>
+              </>
+            ) : (
+              <>
+                <Link href="/login">
+                  <Button variant="ghost" size="default">Login</Button>
+                </Link>
+                <Link href="/login">
+                  <Button size="default">Get Started</Button>
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </header>
 
-      {/* Hero */}
+      {/* Hero - auth aware */}
       <section className="container mx-auto px-4 py-20 text-center">
         <Badge variant="outline" className="mb-4 animate-enter">Now supporting Spotify • BullMQ powered • Dark mode</Badge>
+        {isSignedIn && (
+          <div className="mb-4 animate-enter">
+            <Badge variant="success" className="gap-2">
+              <span className="w-2 h-2 bg-white rounded-full animate-pulse" aria-hidden="true"></span>
+              Signed in as {session.user?.email} • Free tier: 2 accounts, 3 syncs
+            </Badge>
+          </div>
+        )}
         <h1 className="text-5xl font-bold tracking-tight mb-6 max-w-3xl mx-auto whitespace-balance animate-enter stagger-1" style={{ fontFamily: 'Righteous, sans-serif' }}>
           Sync playlists across <span className="text-primary">all your music platforms</span>
         </h1>
@@ -45,12 +76,28 @@ export default function Home() {
           Connect Spotify, Apple Music, YouTube Music, Tidal and more. Transfer playlists in seconds, keep them in sync with BullMQ background jobs, never lose your music. Now with dark mode.
         </p>
         <div className="flex gap-4 justify-center animate-enter stagger-3">
-          <Link href="/login">
-            <Button size="lg" className="gap-2 shadow-glow">Start Syncing Free</Button>
-          </Link>
-          <Link href="#features">
-            <Button variant="outline" size="lg">Learn More</Button>
-          </Link>
+          {isSignedIn ? (
+            <>
+              <Link href="/dashboard">
+                <Button size="lg" className="gap-2 shadow-glow">
+                  <LayoutDashboard className="w-5 h-5" aria-hidden="true" />
+                  Go to Dashboard
+                </Button>
+              </Link>
+              <Link href="/dashboard/connections">
+                <Button variant="outline" size="lg">Connect Spotify</Button>
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link href="/login">
+                <Button size="lg" className="gap-2 shadow-glow">Start Syncing Free</Button>
+              </Link>
+              <Link href="#features">
+                <Button variant="outline" size="lg">Learn More</Button>
+              </Link>
+            </>
+          )}
         </div>
 
         <div className="mt-16 grid grid-cols-2 md:grid-cols-4 gap-4 max-w-3xl mx-auto text-sm animate-enter stagger-4">
@@ -177,8 +224,8 @@ export default function Home() {
                   <li key={i} className="flex gap-2"><span className="text-accent">✓</span> {f}</li>
                 ))}
               </ul>
-              <Link href="/login">
-                <Button variant="outline" className="w-full mt-6">{freePlan.cta}</Button>
+              <Link href={isSignedIn ? "/dashboard" : "/login"}>
+                <Button variant="outline" className="w-full mt-6">{isSignedIn ? "Go to Dashboard" : freePlan.cta}</Button>
               </Link>
               <p className="text-xs text-muted-foreground mt-3 text-center">No credit card required • Dark mode included</p>
             </CardContent>
@@ -204,8 +251,8 @@ export default function Home() {
                   <li key={i} className="flex gap-2"><span className="text-accent">✓</span> {f}</li>
                 ))}
               </ul>
-              <Link href="/login">
-                <Button className="w-full mt-6 shadow-glow">{starterPlan.cta}</Button>
+              <Link href={isSignedIn ? "/dashboard/settings" : "/login"}>
+                <Button className="w-full mt-6 shadow-glow">{isSignedIn ? "Upgrade in Dashboard" : starterPlan.cta}</Button>
               </Link>
               <p className="text-xs text-muted-foreground mt-3 text-center">Paystack • Cancel anytime • Dark mode</p>
             </CardContent>
@@ -228,8 +275,8 @@ export default function Home() {
                   <li key={i} className="flex gap-2"><span className="text-accent">✓</span> {f}</li>
                 ))}
               </ul>
-              <Link href="/login">
-                <Button variant="outline" className="w-full mt-6">{proPlan.cta}</Button>
+              <Link href={isSignedIn ? "/dashboard/settings" : "/login"}>
+                <Button variant="outline" className="w-full mt-6">{isSignedIn ? "Upgrade in Dashboard" : proPlan.cta}</Button>
               </Link>
               <p className="text-xs text-muted-foreground mt-3 text-center">Paystack • Priority support • Dark mode</p>
             </CardContent>
@@ -240,7 +287,9 @@ export default function Home() {
           <p>All plans include: Secure token encryption, BullMQ background jobs, partial failure handling, idempotent retries, dark mode</p>
           <p>Free tier: 2 accounts so you can actually try syncing between Spotify and another provider</p>
           <p>
-            <Link href="/dashboard/settings" className="underline focus-ring rounded">View billing in dashboard</Link> • 
+            <Link href={isSignedIn ? "/dashboard/settings" : "/login"} className="underline focus-ring rounded">
+              {isSignedIn ? "Manage billing in dashboard" : "View billing in dashboard"}
+            </Link> • 
             Enterprise: ₦15k/month for teams, API access, SLA - <a href="mailto:sales@playmeld.com" className="underline focus-ring rounded">Contact Sales</a>
           </p>
         </div>
@@ -252,10 +301,10 @@ export default function Home() {
           <p className="mt-2">
             <a href="https://github.com/mcjosh-sys/playmeld" className="underline focus-ring rounded">GitHub</a> · 
             Built with Next.js, Drizzle, Neon, Paystack, BullMQ, Redis, ngrok, next-themes • 
-            Deployed on Vercel • Docker ready • Dark mode
+            Deployed on Vercel • Docker ready • Dark mode • Auth aware
           </p>
           <p className="mt-2 text-xs">
-            Pricing: Free ₦0, Starter ₦1.5k/mo ($2.99), Pro ₦3.5k/mo ($6.99) - cheaper than Soundiiz/TuneMyMusic • Yearly 28-33% off • Dark mode system preference
+            Pricing: Free ₦0, Starter ₦1.5k/mo ($2.99), Pro ₦3.5k/mo ($6.99) - cheaper than Soundiiz/TuneMyMusic • Yearly 28-33% off • Dark mode system preference • {isSignedIn ? `Signed in as ${session.user?.email}` : "Not signed in"}
           </p>
         </div>
       </footer>
