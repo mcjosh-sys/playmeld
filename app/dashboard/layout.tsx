@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { redirect } from "next/navigation";
 import { Music, LayoutDashboard, Link2, ListMusic, Repeat, Settings, LogOut } from "lucide-react";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -27,14 +28,17 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
       {/* Sidebar - Desktop - Fixed, not scrolling with main */}
       <aside className="w-72 border-r bg-card/80 backdrop-blur-xl p-6 hidden lg:flex flex-col flex-shrink-0 h-screen overflow-y-auto safe-top safe-bottom">
-        <div className="flex items-center gap-3 mb-10 flex-shrink-0">
-          <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-primary-foreground font-bold shadow-glow">
-            <Music className="w-5 h-5" aria-hidden="true" />
+        <div className="flex items-center justify-between gap-3 mb-10 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-primary-foreground font-bold shadow-glow">
+              <Music className="w-5 h-5" aria-hidden="true" />
+            </div>
+            <div>
+              <span className="font-bold text-lg" style={{ fontFamily: 'Righteous, sans-serif' }}>PlayMeld</span>
+              <div className="text-xs text-muted-foreground">Playlist Sync</div>
+            </div>
           </div>
-          <div>
-            <span className="font-bold text-lg" style={{ fontFamily: 'Righteous, sans-serif' }}>PlayMeld</span>
-            <div className="text-xs text-muted-foreground">Playlist Sync</div>
-          </div>
+          <ThemeToggle />
         </div>
 
         <nav className="space-y-2 flex-1 overflow-y-auto" aria-label="Main navigation">
@@ -88,7 +92,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
               </div>
               <span style={{ fontFamily: 'Righteous, sans-serif' }}>PlayMeld</span>
             </Link>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
+              <ThemeToggle />
               <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-medium" aria-label={`User ${session.user.name || session.user.email}`}>
                 {(session.user.name || session.user.email || "U")[0].toUpperCase()}
               </div>

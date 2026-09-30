@@ -3,10 +3,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
 import { Music, Shield, Zap } from "lucide-react";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 
 export default function LoginPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted/20 p-4 safe-top safe-bottom">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted/20 p-4 safe-top safe-bottom relative">
+      {/* Theme toggle top right */}
+      <div className="absolute top-4 right-4">
+        <ThemeToggle />
+      </div>
+
       {/* Skip link */}
       <a href="#main-content" className="skip-link">Skip to main content</a>
 
@@ -17,13 +23,13 @@ export default function LoginPage() {
             <Music className="w-7 h-7" aria-hidden="true" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight" style={{ fontFamily: 'Righteous, sans-serif' }}>PlayMeld</h1>
-          <p className="text-sm text-muted-foreground">Sync playlists across music platforms</p>
+          <p className="text-sm text-muted-foreground">Sync playlists across music platforms • Dark mode supported</p>
         </div>
 
-        <Card className="shadow-xl border-0 glass-card">
+        <Card className="shadow-xl border-0 glass-card dark:bg-card/80">
           <CardHeader className="text-center space-y-2 pb-4">
             <CardTitle className="text-xl">Welcome back</CardTitle>
-            <CardDescription className="text-sm leading-relaxed">Sign in to sync your playlists securely with BullMQ background jobs</CardDescription>
+            <CardDescription className="text-sm leading-relaxed">Sign in to sync your playlists securely with BullMQ background jobs. Respects system theme preference.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <form
@@ -62,7 +68,7 @@ export default function LoginPage() {
                 <div className="w-full border-t" />
               </div>
               <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-card px-2 text-muted-foreground">Secure & Encrypted</span>
+                <span className="bg-card px-2 text-muted-foreground">Secure & Encrypted • Dark Mode</span>
               </div>
             </div>
 
@@ -79,7 +85,7 @@ export default function LoginPage() {
 
             <div id="main-content" className="text-center text-xs text-muted-foreground pt-2 leading-relaxed">
               <p>
-                By signing in, you agree to our Terms and Privacy Policy. Your music provider tokens are encrypted and never logged. Server-side identity authoritative.
+                By signing in, you agree to our Terms and Privacy Policy. Your music provider tokens are encrypted and never logged. Server-side identity authoritative. Theme respects system preference.
               </p>
               <Link href="/" className="underline mt-3 inline-block focus-ring rounded px-1">
                 Back to home
@@ -89,7 +95,7 @@ export default function LoginPage() {
         </Card>
 
         <p className="text-center text-xs text-muted-foreground">
-          © 2026 PlayMeld • AGPL-3.0 • Free tier: 2 accounts, 3 syncs • Starter ₦1.5k/mo
+          © 2026 PlayMeld • AGPL-3.0 • Free tier: 2 accounts, 3 syncs • Starter ₦1.5k/mo • Dark mode
         </p>
       </div>
     </div>
