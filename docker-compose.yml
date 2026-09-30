@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  # PostgreSQL for local dev (optional - can use Neon instead)
+  postgres:
+    image: postgres:15-alpine
+    container_name: playmeld-postgres
+    environment:
+      POSTGRES_USER: playmeld
+      POSTGRES_PASSWORD: playmeld_dev_password
+      POSTGRES_DB: playmeld
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U playmeld"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis for BullMQ
+  redis:
+    image: redis:7-alpine
+    container_name: playmeld-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes
+
+  # Next.js App
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    container_name: playmeld-app
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://playmeld:playmeld_dev_password@postgres:5432/playmeld}
+      - REDIS_URL=redis://redis:6379
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}
+      - PAYSTACK_PUBLIC_KEY=${PAYSTACK_PUBLIC_KEY}
+      - PAYSTACK_SECRET_KEY=${PAYSTACK_SECRET_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
+      - NEXT_PUBLIC_APP_URL=http://localhost:3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./public:/app/public:ro
+
+  # BullMQ Worker
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    container_name: playmeld-worker
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://playmeld:playmeld_dev_password@postgres:5432/playmeld}
+      - REDIS_URL=redis://redis:6379
+      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    command: npm run worker
+
+volumes:
+  postgres_data:
+  redis_data:

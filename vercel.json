@@ -1,0 +1,22 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "functions": {
+    "app/api/sync-jobs/[id]/process/route.ts": {
+      "maxDuration": 60
+    },
+    "app/api/webhooks/paystack/route.ts": {
+      "maxDuration": 10
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/process-pending-jobs",
+      "schedule": "*/5 * * * *"
+    }
+  ],
+  "env": {
+    "NEXT_TELEMETRY_DISABLED": "1"
+  }
+}

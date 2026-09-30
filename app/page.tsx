@@ -2,8 +2,13 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { PLANS, PLANS_USD } from "@/lib/billing/plans";
 
 export default function Home() {
+  const freePlan = PLANS.free;
+  const starterPlan = PLANS.starter;
+  const proPlan = PLANS.pro;
+
   return (
     <div className="min-h-screen">
       {/* Header */}
@@ -29,12 +34,12 @@ export default function Home() {
 
       {/* Hero */}
       <section className="container mx-auto px-4 py-20 text-center">
-        <Badge variant="outline" className="mb-4">Now supporting Spotify</Badge>
+        <Badge variant="outline" className="mb-4">Now supporting Spotify • BullMQ powered</Badge>
         <h1 className="text-5xl font-bold tracking-tight mb-6 max-w-3xl mx-auto">
           Sync playlists across <span className="text-primary">all your music platforms</span>
         </h1>
         <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
-          Connect Spotify, Apple Music, YouTube Music, Tidal and more. Transfer playlists in seconds, keep them in sync, never lose your music.
+          Connect Spotify, Apple Music, YouTube Music, Tidal and more. Transfer playlists in seconds, keep them in sync with BullMQ background jobs, never lose your music.
         </p>
         <div className="flex gap-4 justify-center">
           <Link href="/login">
@@ -88,18 +93,54 @@ export default function Home() {
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-muted-foreground">
-                  Uses ISRC, title, artist, album and duration to find the right track. Low-confidence matches are marked unmatched rather than silently adding wrong songs.
+                  Uses ISRC, title, artist, album and duration to find the right track. Low-confidence matches are marked unmatched rather than silently adding wrong songs. 70% threshold, advanced matching for paid plans.
                 </p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle>Resilient Sync</CardTitle>
-                <CardDescription>Partial failure, retries, idempotency</CardDescription>
+                <CardTitle>Resilient Sync with BullMQ</CardTitle>
+                <CardDescription>Partial failure, retries, idempotency, background jobs</CardDescription>
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-muted-foreground">
-                  82 matched, 10 unmatched, 5 failed? We show the breakdown, not just &quot;failed&quot;. Retries are safe and idempotent - no duplicate playlists.
+                  82 matched, 10 unmatched, 5 failed? We show breakdown, not just &quot;failed&quot;. BullMQ with Redis: 5 concurrency, 10/sec limiter, exponential backoff 5s/25s/125s, idempotent retries - no duplicate playlists. Vercel-ready with fallback cron.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto mt-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Competitive Pricing</CardTitle>
+                <CardDescription>Free tier + reasonable NGN pricing</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  Free: 2 accounts, 3 syncs/month, 100 tracks. Starter ₦1,500/mo (4 accounts, 30 syncs, unlimited tracks, daily auto-sync). Pro ₦3,500/mo unlimited. Yearly 28-33% off. Paystack powered, server-side enforcement.
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Vercel + Docker Ready</CardTitle>
+                <CardDescription>Dynamic deployment</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  Deployed on Vercel with cron fallback. Containerized via Dockerfile multi-stage (app + worker), docker-compose with Postgres + Redis + App + Worker. Works locally, on Vercel, or self-hosted.
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle>Secure by Design</CardTitle>
+                <CardDescription>Multi-tenant SaaS security</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  Server-side identity authoritative, ownership checks every resource, tokens AES-256-GCM encrypted at rest, no secrets in logs, OAuth state validation, webhook HMAC verification, billing enforced server-side, IDOR tested.
                 </p>
               </CardContent>
             </Card>
@@ -107,60 +148,95 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Pricing */}
+      {/* Pricing - Competitive */}
       <section className="container mx-auto px-4 py-20">
-        <h2 className="text-3xl font-bold text-center mb-4">Simple pricing</h2>
-        <p className="text-center text-muted-foreground mb-12">Pay with Paystack. Cancel anytime.</p>
+        <h2 className="text-3xl font-bold text-center mb-4">Simple, competitive pricing</h2>
+        <p className="text-center text-muted-foreground mb-2">Pay with Paystack. Cancel anytime. Free tier included.</p>
+        <p className="text-center text-sm text-muted-foreground mb-12">Cheaper than Soundiiz ($4.5/mo) and TuneMyMusic ($4.5/mo) - built for Africa with global reach</p>
+        
         <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+          {/* Free */}
           <Card>
             <CardHeader>
-              <CardTitle>Free</CardTitle>
-              <CardDescription>For casual syncing</CardDescription>
-              <div className="text-3xl font-bold mt-4">₦0<span className="text-sm font-normal">/month</span></div>
+              <CardTitle>{freePlan.name}</CardTitle>
+              <CardDescription>{freePlan.description}</CardDescription>
+              <div className="mt-4">
+                <div className="text-3xl font-bold">{freePlan.pricing.monthly.display}<span className="text-sm font-normal">/month</span></div>
+                <div className="text-sm text-muted-foreground">{PLANS_USD.free.monthly} • Forever free</div>
+              </div>
             </CardHeader>
             <CardContent>
               <ul className="text-sm space-y-2">
-                <li>✓ 1 connected account</li>
-                <li>✓ 3 syncs per month</li>
-                <li>✓ Basic support</li>
+                {freePlan.features.map((f, i) => (
+                  <li key={i}>✓ {f}</li>
+                ))}
               </ul>
-              <Button variant="outline" className="w-full mt-6">Get Started</Button>
+              <Link href="/login">
+                <Button variant="outline" className="w-full mt-6">{freePlan.cta}</Button>
+              </Link>
+              <p className="text-xs text-muted-foreground mt-3 text-center">No credit card required</p>
             </CardContent>
           </Card>
-          <Card className="border-primary">
+
+          {/* Starter - Popular */}
+          <Card className="border-primary shadow-lg relative">
+            <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+              <Badge className="bg-primary">Most Popular</Badge>
+            </div>
             <CardHeader>
-              <Badge className="w-fit">Popular</Badge>
-              <CardTitle className="mt-2">Starter</CardTitle>
-              <CardDescription>For regular listeners</CardDescription>
-              <div className="text-3xl font-bold mt-4">₦2,500<span className="text-sm font-normal">/month</span></div>
+              <CardTitle className="mt-2">{starterPlan.name}</CardTitle>
+              <CardDescription>{starterPlan.description}</CardDescription>
+              <div className="mt-4">
+                <div className="text-3xl font-bold">{starterPlan.pricing.monthly.display}<span className="text-sm font-normal">/month</span></div>
+                <div className="text-sm text-muted-foreground">{PLANS_USD.starter.monthly} • {starterPlan.pricing.yearly.display}/year ({starterPlan.pricing.yearly.discountPercent}% off)</div>
+                <div className="text-xs text-muted-foreground mt-1">Yearly: {starterPlan.pricing.yearly.display} (₦12k)</div>
+              </div>
             </CardHeader>
             <CardContent>
               <ul className="text-sm space-y-2">
-                <li>✓ 3 connected accounts</li>
-                <li>✓ 50 syncs per month</li>
-                <li>✓ Preserve order</li>
-                <li>✓ Standard support</li>
+                {starterPlan.features.map((f, i) => (
+                  <li key={i}>✓ {f}</li>
+                ))}
               </ul>
-              <Button className="w-full mt-6">Choose Starter</Button>
+              <Link href="/login">
+                <Button className="w-full mt-6">{starterPlan.cta}</Button>
+              </Link>
+              <p className="text-xs text-muted-foreground mt-3 text-center">Paystack • Cancel anytime</p>
             </CardContent>
           </Card>
+
+          {/* Pro */}
           <Card>
             <CardHeader>
-              <CardTitle>Pro</CardTitle>
-              <CardDescription>For power users</CardDescription>
-              <div className="text-3xl font-bold mt-4">₦5,000<span className="text-sm font-normal">/month</span></div>
+              <CardTitle>{proPlan.name}</CardTitle>
+              <CardDescription>{proPlan.description}</CardDescription>
+              <div className="mt-4">
+                <div className="text-3xl font-bold">{proPlan.pricing.monthly.display}<span className="text-sm font-normal">/month</span></div>
+                <div className="text-sm text-muted-foreground">{PLANS_USD.pro.monthly} • {proPlan.pricing.yearly.display}/year ({proPlan.pricing.yearly.discountPercent}% off)</div>
+                <div className="text-xs text-muted-foreground mt-1">Yearly: {proPlan.pricing.yearly.display} (₦30k)</div>
+              </div>
             </CardHeader>
             <CardContent>
               <ul className="text-sm space-y-2">
-                <li>✓ Unlimited accounts</li>
-                <li>✓ Unlimited syncs</li>
-                <li>✓ Preserve duplicates</li>
-                <li>✓ Advanced matching</li>
-                <li>✓ Priority support</li>
+                {proPlan.features.slice(0, 8).map((f, i) => (
+                  <li key={i}>✓ {f}</li>
+                ))}
               </ul>
-              <Button variant="outline" className="w-full mt-6">Choose Pro</Button>
+              <Link href="/login">
+                <Button variant="outline" className="w-full mt-6">{proPlan.cta}</Button>
+              </Link>
+              <p className="text-xs text-muted-foreground mt-3 text-center">Paystack • Priority support</p>
             </CardContent>
           </Card>
+        </div>
+
+        <div className="text-center mt-12 text-sm text-muted-foreground">
+          <p>All plans include: Secure token encryption, BullMQ background jobs, partial failure handling, idempotent retries</p>
+          <p className="mt-2">Free tier: 2 accounts so you can actually try syncing between Spotify and another provider</p>
+          <p className="mt-2">
+            <Link href="/dashboard/settings" className="underline">View billing in dashboard</Link> • 
+            Enterprise: ₦15k/month for teams, API access, SLA - <a href="mailto:sales@playmeld.com" className="underline">Contact Sales</a>
+          </p>
         </div>
       </section>
 
@@ -168,7 +244,12 @@ export default function Home() {
         <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
           <p>© 2026 PlayMeld. Licensed under AGPL-3.0. Source available.</p>
           <p className="mt-2">
-            <a href="https://github.com/mcjosh-sys/playmeld" className="underline">GitHub</a> · Built with Next.js, Drizzle, Neon, Paystack, ngrok
+            <a href="https://github.com/mcjosh-sys/playmeld" className="underline">GitHub</a> · 
+            Built with Next.js, Drizzle, Neon, Paystack, BullMQ, Redis, ngrok • 
+            Deployed on Vercel • Docker ready
+          </p>
+          <p className="mt-2 text-xs">
+            Pricing: Free ₦0, Starter ₦1.5k/mo ($2.99), Pro ₦3.5k/mo ($6.99) - cheaper than Soundiiz/TuneMyMusic • Yearly 28-33% off
           </p>
         </div>
       </footer>
