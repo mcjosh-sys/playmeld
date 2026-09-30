@@ -32,6 +32,31 @@ const nextConfig = {
       },
     ],
   },
+  async redirects() {
+    return [
+      // Redirect old routes (from route group) to new /dashboard/* structure
+      {
+        source: "/connections",
+        destination: "/dashboard/connections",
+        permanent: true,
+      },
+      {
+        source: "/playlists",
+        destination: "/dashboard/playlists",
+        permanent: true,
+      },
+      {
+        source: "/syncs",
+        destination: "/dashboard/syncs",
+        permanent: true,
+      },
+      {
+        source: "/settings",
+        destination: "/dashboard/settings",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
