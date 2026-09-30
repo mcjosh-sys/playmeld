@@ -1,13 +1,14 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { connectedAccounts } from "@/db/schema";
 import { eq } from "drizzle-orm";
+import { getAppUrl } from "@/lib/url";
 
 export const runtime = "nodejs";
 
 // List connected accounts - with ownership check
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -31,8 +32,8 @@ export async function GET() {
   return NextResponse.json({ data: accounts });
 }
 
-// For future: initiate OAuth flow
-export async function POST(req: Request) {
+// Initiate OAuth flow - generates secure state
+export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -56,9 +57,11 @@ export async function POST(req: Request) {
       })
     ).toString("base64url");
 
-    // Build authorization URL - will be handled by provider-specific route
-    // For now return state and indicate next step
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    // Use helper that prioritizes NEXTAUTH_URL over NEXT_PUBLIC_APP_URL
+    // Fixes bug where localhost was used even when NEXTAUTH_URL set to ngrok
+    const appUrl = getAppUrl(req);
+    
+    console.log(`[Initiate] User ${session.user.id} -> ${provider}, appUrl: ${appUrl}, NEXTAUTH_URL: ${process.env.NEXTAUTH_URL}, NEXT_PUBLIC_APP_URL: ${process.env.NEXT_PUBLIC_APP_URL}`);
     
     return NextResponse.json({
       data: {

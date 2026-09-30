@@ -5,6 +5,7 @@ import { connectedAccounts } from "@/db/schema";
 import { getProvider } from "@/lib/providers/factory";
 import { encryptToken } from "@/lib/encryption";
 import { eq, and } from "drizzle-orm";
+import { getRedirectUri, getAppUrl } from "@/lib/url";
 
 export const runtime = "nodejs";
 
@@ -34,7 +35,6 @@ export async function GET(req: NextRequest, { params }: { params: { provider: st
   }
 
   try {
-    // Validate state - server-side identity is authoritative
     let decoded: any;
     try {
       decoded = JSON.parse(Buffer.from(state, "base64url").toString());
@@ -53,36 +53,35 @@ export async function GET(req: NextRequest, { params }: { params: { provider: st
       return NextResponse.redirect(new URL("/dashboard/connections?error=invalid_state_user_mismatch", req.url));
     }
 
-    // Check timestamp to prevent replay (10 min window - increased from 5 for better UX)
     if (decoded.timestamp && Date.now() - decoded.timestamp > 10 * 60 * 1000) {
       console.warn(`State expired for ${providerName}, age: ${Date.now() - decoded.timestamp}ms`);
       return NextResponse.redirect(new URL("/dashboard/connections?error=state_expired", req.url));
     }
 
-    // Validate provider matches state
     if (decoded.provider && decoded.provider !== providerName) {
       console.error(`State provider mismatch: expected ${providerName}, got ${decoded.provider}`);
       return NextResponse.redirect(new URL("/dashboard/connections?error=provider_mismatch", req.url));
     }
 
     const provider = getProvider(providerName);
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "http://localhost:3000";
-    const redirectUri = `${appUrl}/api/connected-accounts/callback/${providerName}`;
+    
+    // Use helper that prioritizes NEXTAUTH_URL - must match exactly the URI used in authorize step
+    // Fixes bug where localhost was used even when NEXTAUTH_URL set to ngrok, causing Spotify to reject
+    const redirectUri = getRedirectUri(req, providerName);
+    const appUrl = getAppUrl(req);
 
-    console.log(`Exchanging code for tokens for ${providerName}, user ${session.user.id}, redirectUri: ${redirectUri}`);
+    console.log(`[Callback] Exchanging code for ${providerName}, user ${session.user.id}, appUrl: ${appUrl}, redirectUri: ${redirectUri}, NEXTAUTH_URL: ${process.env.NEXTAUTH_URL}`);
 
-    // Exchange code for tokens - tokens are secrets, never log
     let tokens;
     try {
       tokens = await provider.exchangeCodeForTokens(code, redirectUri);
     } catch (tokenErr) {
-      console.error(`Token exchange failed for ${providerName}`, tokenErr instanceof Error ? tokenErr.message : tokenErr);
+      console.error(`Token exchange failed for ${providerName}, redirectUri: ${redirectUri}`, tokenErr instanceof Error ? tokenErr.message : tokenErr);
       return NextResponse.redirect(
-        new URL(`/dashboard/connections?error=token_exchange_failed&provider=${providerName}`, req.url)
+        new URL(`/dashboard/connections?error=token_exchange_failed&provider=${providerName}&redirectUri=${encodeURIComponent(redirectUri)}`, req.url)
       );
     }
 
-    // Get provider user info
     let providerUser;
     try {
       providerUser = await provider.getCurrentUser(tokens.accessToken);
@@ -91,11 +90,9 @@ export async function GET(req: NextRequest, { params }: { params: { provider: st
       return NextResponse.redirect(new URL(`/dashboard/connections?error=failed_to_get_user&provider=${providerName}`, req.url));
     }
 
-    // Encrypt tokens at rest
     const accessTokenEncrypted = encryptToken(tokens.accessToken);
     const refreshTokenEncrypted = tokens.refreshToken ? encryptToken(tokens.refreshToken) : null;
 
-    // Check if account already exists for this user
     const existing = await db
       .select()
       .from(connectedAccounts)
@@ -109,7 +106,6 @@ export async function GET(req: NextRequest, { params }: { params: { provider: st
       .limit(1);
 
     if (existing.length > 0) {
-      // Update existing
       await db
         .update(connectedAccounts)
         .set({
@@ -126,7 +122,6 @@ export async function GET(req: NextRequest, { params }: { params: { provider: st
 
       console.log(`Updated existing connected account ${existing[0].id} for user ${session.user.id}`);
     } else {
-      // Create new
       const [newAccount] = await db
         .insert(connectedAccounts)
         .values({
@@ -150,7 +145,6 @@ export async function GET(req: NextRequest, { params }: { params: { provider: st
 
     return NextResponse.redirect(new URL("/dashboard/connections?success=connected", req.url));
   } catch (err) {
-    // Safe error - don't expose tokens or secrets
     console.error(`Failed to complete OAuth for ${providerName}`, err instanceof Error ? err.message : err, err instanceof Error ? err.stack : "");
     return NextResponse.redirect(new URL(`/dashboard/connections?error=oauth_failed&provider=${providerName}`, req.url));
   }
