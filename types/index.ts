@@ -1,5 +1,4 @@
 export type { ProviderName, NormalizedTrack, NormalizedPlaylist, ProviderCapabilities } from "@/lib/providers/types";
-export type { SyncJobStatus, SyncItemStatus } from "@/db/schema";
 
 export interface ApiResponse<T> {
   data?: T;
