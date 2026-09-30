@@ -379,6 +379,46 @@ export const paystackEvents = pgTable(
   ]
 );
 
+// Plans - pricing model
+export const plans = pgTable(
+  "plans",
+  {
+    id: text("id").primaryKey(), // free, starter, pro, enterprise
+    name: text("name").notNull(),
+    description: text("description"),
+    priceMonthly: integer("price_monthly").notNull(), // in kobo
+    priceYearly: integer("price_yearly").notNull(), // in kobo
+    currency: text("currency").notNull().default("NGN"),
+    paystackMonthlyPlanCode: text("paystack_monthly_plan_code"),
+    paystackYearlyPlanCode: text("paystack_yearly_plan_code"),
+    limits: jsonb("limits")
+      .$type<{
+        maxConnectedAccounts: number;
+        maxSyncsPerMonth: number;
+        maxTracksPerSync: number;
+        maxPlaylistsPerSync: number;
+        canPreserveOrder: boolean;
+        canPreserveDuplicates: boolean;
+        canCreatePublicPlaylists: boolean;
+        canCreatePrivatePlaylists: boolean;
+        canUseAdvancedMatching: boolean;
+        canAutoSync: boolean;
+        autoSyncIntervalHours: number | null;
+        canSyncCollaborativePlaylists: boolean;
+        hasPrioritySupport: boolean;
+        hasTeamAccess: boolean;
+        hasApiAccess: boolean;
+      }>()
+      .notNull(),
+    features: jsonb("features").$type<string[]>().notNull(),
+    isActive: boolean("is_active").notNull().default(true),
+    isPopular: boolean("is_popular").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("plans_active_idx").on(t.isActive)]
+);
+
 // Subscriptions - detailed subscription tracking (alternative to workspace fields, for history)
 export const subscriptions = pgTable(
   "subscriptions",
@@ -408,6 +448,31 @@ export const subscriptions = pgTable(
     index("subscriptions_workspace_idx").on(t.workspaceId),
     index("subscriptions_user_idx").on(t.userId),
     index("subscriptions_status_idx").on(t.status),
+  ]
+);
+
+// Usage tracking for plan limits
+export const usageRecords = pgTable(
+  "usage_records",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => createId()),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id").references(() => workspaces.id, {
+      onDelete: "cascade",
+    }),
+    month: text("month").notNull(), // YYYY-MM format
+    syncCount: integer("sync_count").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("usage_records_user_month_unique").on(t.userId, t.month),
+    index("usage_records_workspace_idx").on(t.workspaceId),
+    index("usage_records_month_idx").on(t.month),
   ]
 );
 
