@@ -2,6 +2,7 @@ import { auth, signOut } from "@/lib/auth";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { redirect } from "next/navigation";
+import { Music, LayoutDashboard, Link2, ListMusic, Repeat, Settings, LogOut } from "lucide-react";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -9,47 +10,67 @@ export default async function DashboardLayout({ children }: { children: React.Re
     redirect("/login");
   }
 
+  const navItems = [
+    { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/dashboard/connections", label: "Connections", icon: Link2 },
+    { href: "/dashboard/playlists", label: "Playlists", icon: ListMusic },
+    { href: "/dashboard/syncs", label: "Sync Jobs", icon: Repeat },
+    { href: "/dashboard/settings", label: "Settings", icon: Settings },
+  ];
+
   return (
-    <div className="min-h-screen flex">
-      {/* Sidebar */}
-      <aside className="w-64 border-r bg-muted/20 p-4 hidden md:block">
-        <div className="flex items-center gap-2 mb-8">
-          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-primary-foreground font-bold">
-            P
+    <div className="min-h-screen flex bg-background">
+      {/* Skip link for keyboard users */}
+      <a href="#main-content" className="skip-link">
+        Skip to main content
+      </a>
+
+      {/* Sidebar - Desktop */}
+      <aside className="w-72 border-r bg-card/50 backdrop-blur-sm p-6 hidden lg:flex flex-col sticky top-0 h-screen safe-top safe-bottom">
+        <div className="flex items-center gap-3 mb-10">
+          <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-primary-foreground font-bold shadow-glow">
+            <Music className="w-5 h-5" aria-hidden="true" />
           </div>
-          <span className="font-bold">PlayMeld</span>
+          <div>
+            <span className="font-bold text-lg" style={{ fontFamily: 'Righteous, sans-serif' }}>PlayMeld</span>
+            <div className="text-xs text-muted-foreground">Playlist Sync</div>
+          </div>
         </div>
-        <nav className="space-y-1">
-          <Link href="/dashboard" className="block px-3 py-2 rounded hover:bg-accent text-sm">
-            Dashboard
-          </Link>
-          <Link href="/dashboard/connections" className="block px-3 py-2 rounded hover:bg-accent text-sm">
-            Connections
-          </Link>
-          <Link href="/dashboard/playlists" className="block px-3 py-2 rounded hover:bg-accent text-sm">
-            Playlists
-          </Link>
-          <Link href="/dashboard/syncs" className="block px-3 py-2 rounded hover:bg-accent text-sm">
-            Sync Jobs
-          </Link>
-          <Link href="/dashboard/settings" className="block px-3 py-2 rounded hover:bg-accent text-sm">
-            Settings
-          </Link>
+
+        <nav className="space-y-2 flex-1" aria-label="Main navigation">
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-accent hover:text-accent-foreground text-sm font-medium transition-all duration-200 focus-ring clickable touch-target justify-start"
+                aria-label={`Go to ${item.label}`}
+              >
+                <Icon className="w-5 h-5" aria-hidden="true" />
+                {item.label}
+              </Link>
+            );
+          })}
         </nav>
 
-        <div className="mt-8 pt-8 border-t">
-          <div className="text-sm">
-            <div className="font-medium">{session.user.name || session.user.email}</div>
-            <div className="text-muted-foreground text-xs truncate">{session.user.email}</div>
+        <div className="mt-auto pt-8 border-t space-y-4">
+          <div className="px-4 py-3 rounded-xl bg-muted/50">
+            <div className="text-sm font-medium truncate" title={session.user.name || session.user.email || ""}>
+              {session.user.name || "User"}
+            </div>
+            <div className="text-xs text-muted-foreground truncate" title={session.user.email || ""}>
+              {session.user.email}
+            </div>
           </div>
           <form
             action={async () => {
               "use server";
               await signOut({ redirectTo: "/" });
             }}
-            className="mt-4"
           >
-            <Button variant="outline" size="sm" className="w-full">
+            <Button variant="outline" size="default" className="w-full justify-start gap-3">
+              <LogOut className="w-4 h-4" aria-hidden="true" />
               Sign Out
             </Button>
           </form>
@@ -57,23 +78,51 @@ export default async function DashboardLayout({ children }: { children: React.Re
       </aside>
 
       {/* Main */}
-      <main className="flex-1">
+      <div className="flex-1 flex flex-col min-w-0">
         {/* Mobile header */}
-        <header className="md:hidden border-b p-4 flex justify-between items-center">
-          <Link href="/dashboard" className="font-bold">
-            PlayMeld
-          </Link>
-          <div className="flex gap-2 text-xs">
-            <Link href="/dashboard/connections" className="underline">
-              Connections
+        <header className="lg:hidden border-b bg-card/80 backdrop-blur-md sticky top-0 z-40 safe-top">
+          <div className="flex justify-between items-center p-4">
+            <Link href="/dashboard" className="flex items-center gap-2 font-bold focus-ring rounded-xl p-2 -m-2" aria-label="Go to dashboard">
+              <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-primary-foreground">
+                <Music className="w-4 h-4" aria-hidden="true" />
+              </div>
+              <span style={{ fontFamily: 'Righteous, sans-serif' }}>PlayMeld</span>
             </Link>
-            <Link href="/dashboard/syncs" className="underline">
-              Syncs
-            </Link>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-xs font-medium" aria-label={`User ${session.user.name || session.user.email}`}>
+                {(session.user.name || session.user.email || "U")[0].toUpperCase()}
+              </div>
+            </div>
           </div>
         </header>
-        <div className="p-6">{children}</div>
-      </main>
+
+        <main id="main-content" className="flex-1 p-4 sm:p-6 lg:p-8 container-playmeld animate-enter" tabIndex={-1}>
+          {children}
+        </main>
+
+        {/* Mobile bottom nav - ≤5 items, labels with icons, 44x44 min */}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-card/90 backdrop-blur-xl border-t z-50 safe-bottom" aria-label="Mobile navigation">
+          <div className="flex justify-around items-center py-2 px-2">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="flex flex-col items-center gap-1 px-3 py-2 rounded-xl hover:bg-accent text-xs font-medium transition-colors min-w-[60px] min-h-[56px] justify-center focus-ring"
+                  aria-label={item.label}
+                >
+                  <Icon className="w-5 h-5" aria-hidden="true" />
+                  <span className="text-[10px] leading-none">{item.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </nav>
+
+        {/* Spacer for mobile bottom nav */}
+        <div className="lg:hidden h-20" aria-hidden="true" />
+      </div>
     </div>
   );
 }
