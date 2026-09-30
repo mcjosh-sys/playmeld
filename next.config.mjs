@@ -34,7 +34,6 @@ const nextConfig = {
   },
   async redirects() {
     return [
-      // Redirect old routes (from route group) to new /dashboard/* structure
       {
         source: "/connections",
         destination: "/dashboard/connections",
@@ -56,6 +55,22 @@ const nextConfig = {
         permanent: true,
       },
     ];
+  },
+  webpack: (config, { isServer }) => {
+    // Ignore optional BullMQ dependency that causes warning
+    // @valkey/valkey-glide is optional and not needed for ioredis
+    if (isServer) {
+      config.externals = config.externals || [];
+      config.externals.push({
+        "@valkey/valkey-glide": "commonjs @valkey/valkey-glide",
+      });
+    }
+    // Also ignore it via alias to prevent bundling attempt
+    config.resolve = config.resolve || {};
+    config.resolve.alias = config.resolve.alias || {};
+    config.resolve.alias["@valkey/valkey-glide"] = false;
+
+    return config;
   },
 };
 

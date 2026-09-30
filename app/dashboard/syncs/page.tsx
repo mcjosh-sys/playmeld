@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Music, Repeat, Clock, CheckCircle, AlertTriangle, XCircle, Plus, AlertCircle, BarChart3 } from "lucide-react";
 import Link from "next/link";
+import { ProcessButton } from "@/components/syncs/process-button";
 
 export default async function SyncsPage() {
   const session = await auth();
@@ -175,7 +176,6 @@ export default async function SyncsPage() {
                     </div>
                   </div>
 
-                  {/* No horizontal scroll - stack on mobile, grid on desktop */}
                   <div className="mt-4 grid grid-cols-3 sm:grid-cols-5 gap-3 text-xs p-3 rounded-xl bg-muted/30">
                     <div className="space-y-1">
                       <div className="text-muted-foreground text-[11px] uppercase tracking-wide">Total</div>
@@ -210,6 +210,27 @@ export default async function SyncsPage() {
                     <div className="mt-3 text-xs text-muted-foreground flex items-center gap-2">
                       <Clock className="w-3 h-3" aria-hidden="true" />
                       Phase: <span className="font-medium">{(job.progress as any).phase || "unknown"}</span> • Processed {job.processedTracks ?? 0}/{job.totalTracks ?? 0}
+                    </div>
+                  )}
+
+                  {/* Fix for Pending stuck: Show Process button for pending/failed jobs */}
+                  {(job.status === "pending" || job.status === "failed") && (
+                    <div className="mt-4 p-3 rounded-xl bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800 flex flex-col sm:flex-row justify-between gap-3">
+                      <div className="text-xs space-y-1">
+                        <p className="font-medium text-yellow-900 dark:text-yellow-100 flex items-center gap-1">
+                          <AlertCircle className="w-4 h-4" aria-hidden="true" />
+                          Job stuck in {job.status}? {job.status === "pending" ? "BullMQ worker may not be running" : "Previous attempt failed"}
+                        </p>
+                        <p className="text-yellow-700 dark:text-yellow-300">
+                          {job.status === "pending"
+                            ? "BullMQ enqueued but worker not processing. Click Process to run directly via fallback processor, or run npm run worker, or wait for cron fallback (every 5 min processes pending >60s old)."
+                            : "Previous run failed. Click Process to retry directly."}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">Logs: BullMQ sync queue initialized, Redis connected, Enqueued with BullMQ job id - but stuck Pending means worker not running. Fallback processing now auto-triggers after 3s if still pending.</p>
+                      </div>
+                      <div className="flex-shrink-0">
+                        <ProcessButton jobId={job.id} size="default" variant="default" className="gap-2 shadow-glow" />
+                      </div>
                     </div>
                   )}
                 </div>

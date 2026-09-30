@@ -68,7 +68,24 @@ export function SyncPlaylistModal({ sourceAccountId, sourcePlaylist, accounts, o
         throw new Error(data.error || "Failed to create sync job");
       }
 
-      setSuccess(data.data);
+      const job = data.data;
+      setSuccess(job);
+
+      // Auto-trigger processing as fallback if BullMQ worker not running
+      // The POST /api/sync-jobs already triggers fallback after 3s, but we also trigger here for faster UX
+      try {
+        console.log(`[SyncModal] Job ${job.id} created, triggering fallback processing via /process endpoint`);
+        // Fire and forget process call - don't await, let it run in background
+        fetch(`/api/sync-jobs/${encodeURIComponent(job.id)}/process`, { method: "POST" })
+          .then((res) => res.json())
+          .then((processData) => {
+            console.log(`[SyncModal] Fallback processing result for ${job.id}:`, processData);
+          })
+          .catch((err) => {
+            console.warn(`[SyncModal] Fallback processing failed for ${job.id}, will rely on BullMQ worker or cron`, err);
+          });
+      } catch {}
+
       // Refresh after short delay and redirect to syncs
       setTimeout(() => {
         router.push("/dashboard/syncs");

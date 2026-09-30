@@ -169,8 +169,11 @@ export async function POST(req: NextRequest) {
       .returning();
 
     // Enqueue to BullMQ - async processing
+    let bullmqJobId: string | null = null;
+    let enqueueError: any = null;
+
     try {
-      const bullmqJobId = await enqueueSyncJob({
+      bullmqJobId = await enqueueSyncJob({
         syncJobId: job.id,
         userId: session.user.id,
         workspaceId: workspace?.id,
@@ -180,28 +183,88 @@ export async function POST(req: NextRequest) {
       });
 
       console.log(`Sync job ${job.id} enqueued with BullMQ id ${bullmqJobId}`);
+    } catch (queueErr) {
+      enqueueError = queueErr;
+      console.warn("Failed to enqueue to BullMQ, will use fallback processing", queueErr);
+    }
 
+    // Fallback processing: If BullMQ enqueue succeeded but worker may not be running (jobs stuck in Pending),
+    // trigger background direct processing after short delay if job still pending
+    // This ensures sync works even without separate worker process (e.g., local dev without worker, Vercel without Redis worker)
+    const triggerFallbackProcessing = async () => {
+      // Wait 3 seconds to give BullMQ worker chance to pick up
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+
+      try {
+        // Check if job still pending - if so, worker didn't pick it up, process directly
+        const { neon } = await import("@neondatabase/serverless");
+        const { drizzle } = await import("drizzle-orm/neon-http");
+        const schema = await import("@/db/schema");
+        const { eq, and } = await import("drizzle-orm");
+
+        const sql = neon(process.env.DATABASE_URL!);
+        const dbCheck = drizzle(sql, { schema });
+
+        const userId = session?.user?.id;
+        if (!userId) return;
+
+        const [currentJob] = await dbCheck
+          .select()
+          .from(schema.syncJobs)
+          .where(and(eq(schema.syncJobs.id, job.id), eq(schema.syncJobs.userId, userId)))
+          .limit(1);
+
+        if (currentJob && currentJob.status === "pending") {
+          console.log(`[Fallback] Job ${job.id} still pending after 3s, BullMQ worker may not be running. Triggering direct processing as fallback.`);
+
+          // Process directly via shared processor
+          const { processSyncJobDirect } = await import("@/lib/sync/processor");
+          const result = await processSyncJobDirect(job.id, userId);
+
+          console.log(`[Fallback] Direct processing completed for job ${job.id}:`, result.status);
+        } else {
+          console.log(`[Fallback] Job ${job.id} status is ${currentJob?.status}, not pending, skipping fallback processing (worker likely picked it up)`);
+        }
+      } catch (fallbackErr) {
+        console.error(`[Fallback] Failed to process job ${job.id} via fallback`, fallbackErr instanceof Error ? fallbackErr.message : fallbackErr);
+      }
+    };
+
+    // Trigger fallback in background without blocking response (fire and forget)
+    // Use setImmediate to not block, and catch errors
+    if (typeof setImmediate !== "undefined") {
+      setImmediate(() => {
+        triggerFallbackProcessing().catch((err) => console.error("Fallback processing error", err));
+      });
+    } else {
+      // Fallback to setTimeout
+      setTimeout(() => {
+        triggerFallbackProcessing().catch((err) => console.error("Fallback processing error", err));
+      }, 3000);
+    }
+
+    // Return 202 immediately with queue status
+    if (bullmqJobId) {
       return NextResponse.json(
         {
           data: job,
           queue: {
             bullmqJobId,
             status: "queued",
+            fallback: "Fallback direct processing scheduled after 3s if worker not running",
           },
         },
         { status: 202 }
       );
-    } catch (queueErr) {
-      console.warn("Failed to enqueue to BullMQ, job remains pending for manual processing", queueErr);
-
-      // Fallback: job is created as pending, can be processed via /api/sync-jobs/[id]/process
-      // For Vercel without Redis, this allows manual trigger or cron
+    } else {
       return NextResponse.json(
         {
           data: job,
           queue: {
             status: "pending_fallback",
-            message: "Queued via DB fallback - worker will pick up or use /process endpoint",
+            message: "BullMQ enqueue failed, using direct fallback processing in background",
+            error: enqueueError?.message?.slice(0, 200),
+            fallback: "Direct processing triggered in background via processor.ts",
           },
         },
         { status: 202 }
