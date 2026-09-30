@@ -56,6 +56,47 @@ function getClientSecret(): string {
   return secret;
 }
 
+// Client credentials token cache for public playlist fallback
+let clientCredentialsToken: { token: string; expiresAt: number } | null = null;
+
+async function getClientCredentialsToken(): Promise<string> {
+  const now = Date.now();
+  if (clientCredentialsToken && clientCredentialsToken.expiresAt > now + 60000) {
+    return clientCredentialsToken.token;
+  }
+
+  const clientId = getClientId();
+  const clientSecret = getClientSecret();
+  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+
+  const res = await fetch(`${SPOTIFY_AUTH_BASE}/api/token`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${basic}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+    }).toString(),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.error(`Spotify client credentials failed: ${res.status} ${text.slice(0, 200)}`);
+    throw new ProviderAuthenticationError("spotify", `Client credentials failed: ${res.status}`);
+  }
+
+  const data = (await res.json()) as SpotifyTokenResponse;
+  clientCredentialsToken = {
+    token: data.access_token,
+    expiresAt: now + data.expires_in * 1000,
+  };
+
+  console.log(`[Spotify] Got client credentials token, expires in ${data.expires_in}s`);
+
+  return data.access_token;
+}
+
 interface SpotifyTokenResponse {
   access_token: string;
   token_type: string;
@@ -327,12 +368,39 @@ export class SpotifyProvider implements MusicProvider {
   }
 
   async getPlaylist(accessToken: string, playlistId: string): Promise<NormalizedPlaylist> {
-    const res = await spotifyFetch(accessToken, `/playlists/${encodeURIComponent(playlistId)}`);
+    const tryFetch = async (token: string) => {
+      return spotifyFetch(token, `/playlists/${encodeURIComponent(playlistId)}`);
+    };
+
+    let res = await tryFetch(accessToken);
+
+    // If 403 with user token, try client credentials for public playlists
+    if (!res.ok && res.status === 403) {
+      const body = await res.text();
+      console.warn(`[Spotify] getPlaylist ${playlistId} 403 with user token, trying CC fallback. Body: ${body.slice(0, 300)}`);
+      try {
+        const ccToken = await getClientCredentialsToken();
+        const ccRes = await tryFetch(ccToken);
+        if (ccRes.ok) {
+          console.log(`[Spotify] CC fallback SUCCESS for getPlaylist ${playlistId}`);
+          res = ccRes;
+        } else {
+          const ccBody = await ccRes.text();
+          console.error(`[Spotify] CC fallback failed for getPlaylist ${playlistId} ${ccRes.status}: ${ccBody.slice(0, 300)}`);
+          throw translateHttpError("spotify", res.status, body, Object.fromEntries(res.headers.entries()));
+        }
+      } catch (ccErr: any) {
+        if (ccErr.code) throw ccErr;
+        throw translateHttpError("spotify", 403, body, {});
+      }
+    }
+
     if (!res.ok) {
       const body = await res.text();
       console.error(`[Spotify] getPlaylist ${playlistId} failed ${res.status}: ${body.slice(0, 500)}`);
       throw translateHttpError("spotify", res.status, body, Object.fromEntries(res.headers.entries()));
     }
+
     let data: any;
     try {
       data = await res.json();
@@ -361,24 +429,62 @@ export class SpotifyProvider implements MusicProvider {
     };
 
     let res = await tryFetch(true);
+    let lastBody = "";
 
     // If 403 Forbidden with market param, retry without market - some public playlists require no market
     if (!res.ok && res.status === 403) {
-      const body = await res.text();
-      console.warn(`[Spotify] Playlist tracks ${playlistId} 403 with market=from_token, retrying without market. Body: ${body.slice(0, 300)}`);
+      lastBody = await res.text();
+      console.warn(`[Spotify] Playlist tracks ${playlistId} 403 with market=from_token, retrying without market. Body: ${lastBody.slice(0, 300)}`);
       
-      // Try without market
       res = await tryFetch(false);
       
       if (!res.ok) {
-        const body2 = await res.text();
-        console.error(`[Spotify] Playlist tracks ${playlistId} still 403 without market. Body: ${body2.slice(0, 500)}`);
-        throw translateHttpError("spotify", res.status, body2, Object.fromEntries(res.headers.entries()));
+        lastBody = await res.text();
+        console.error(`[Spotify] Playlist tracks ${playlistId} still 403 without market with user token. Body: ${lastBody.slice(0, 500)}`);
+        
+        // For public playlists not owned, try client credentials token as fallback
+        // Per Spotify docs, Get Playlist Items only allows owned/collaborative with user token, but client credentials can access public playlists
+        console.log(`[Spotify] Trying client credentials fallback for public playlist ${playlistId}`);
+        try {
+          const ccToken = await getClientCredentialsToken();
+          
+          const tryFetchCC = async (withMarket: boolean): Promise<Response> => {
+            const params = new URLSearchParams({
+              limit: Math.min(limit, 100).toString(),
+              offset: offset.toString(),
+            });
+            if (withMarket) params.set("market", "from_token");
+            const url = `/playlists/${encodeURIComponent(playlistId)}/tracks?${params.toString()}`;
+            console.log(`[Spotify] CC fallback fetching ${playlistId} withMarket=${withMarket}`);
+            return spotifyFetch(ccToken, url);
+          };
+
+          let ccRes = await tryFetchCC(false);
+          
+          if (!ccRes.ok && ccRes.status === 403) {
+            ccRes = await tryFetchCC(true);
+          }
+
+          if (ccRes.ok) {
+            console.log(`[Spotify] Client credentials fallback SUCCESS for public playlist ${playlistId}`);
+            res = ccRes;
+            lastBody = "";
+          } else {
+            const ccBody = await ccRes.text();
+            console.error(`[Spotify] CC fallback also failed ${ccRes.status}: ${ccBody.slice(0, 500)}`);
+            // Throw original user token error with better message
+            throw translateHttpError("spotify", res.status, lastBody, Object.fromEntries(res.headers.entries()));
+          }
+        } catch (ccErr: any) {
+          if (ccErr.code) throw ccErr; // Already a ProviderError
+          console.error(`[Spotify] CC fallback exception`, ccErr);
+          throw translateHttpError("spotify", 403, lastBody, {});
+        }
       }
     }
 
     if (!res.ok) {
-      const body = await res.text();
+      const body = lastBody || (await res.text());
       console.error(`[Spotify] Playlist tracks ${playlistId} failed ${res.status}: ${body.slice(0, 500)}`);
       throw translateHttpError("spotify", res.status, body, Object.fromEntries(res.headers.entries()));
     }
