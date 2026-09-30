@@ -60,7 +60,7 @@ export default async function Home() {
 
       {/* Hero - auth aware */}
       <section className="container mx-auto px-4 py-20 text-center">
-        <Badge variant="outline" className="mb-4 animate-enter">Now supporting Spotify • BullMQ powered • Dark mode</Badge>
+        <Badge variant="outline" className="mb-4 animate-enter">Now supporting Spotify + YouTube Music • BullMQ powered • Dark mode</Badge>
         {isSignedIn && (
           <div className="mb-4 animate-enter">
             <Badge variant="success" className="gap-2">
@@ -101,18 +101,20 @@ export default async function Home() {
         </div>
 
         <div className="mt-16 grid grid-cols-2 md:grid-cols-4 gap-4 max-w-3xl mx-auto text-sm animate-enter stagger-4">
-          <div className="p-4 border rounded-xl hover:shadow-md transition-shadow">
+          <div className="p-4 border rounded-xl hover:shadow-md transition-shadow border-[#1DB954]/20">
             <div className="font-semibold">Spotify</div>
             <div className="text-muted-foreground flex items-center justify-center gap-1">
-              <span className="w-2 h-2 bg-accent rounded-full" aria-hidden="true"></span> Supported
+              <span className="w-2 h-2 bg-[#1DB954] rounded-full" aria-hidden="true"></span> Supported
+            </div>
+          </div>
+          <div className="p-4 border rounded-xl hover:shadow-md transition-shadow border-[#FF0000]/20">
+            <div className="font-semibold">YouTube Music</div>
+            <div className="text-muted-foreground flex items-center justify-center gap-1">
+              <span className="w-2 h-2 bg-[#FF0000] rounded-full" aria-hidden="true"></span> Supported
             </div>
           </div>
           <div className="p-4 border rounded-xl opacity-60 border-dashed">
             <div className="font-semibold">Apple Music</div>
-            <div className="text-muted-foreground">Coming soon</div>
-          </div>
-          <div className="p-4 border rounded-xl opacity-60 border-dashed">
-            <div className="font-semibold">YouTube Music</div>
             <div className="text-muted-foreground">Coming soon</div>
           </div>
           <div className="p-4 border rounded-xl opacity-60 border-dashed">

@@ -1,5 +1,6 @@
 import { MusicProvider, ProviderName } from "./types";
 import { SpotifyProvider } from "./spotify/client";
+import { YouTubeMusicProvider } from "./youtube-music/client";
 import { ProviderUnsupportedOperationError } from "./errors";
 
 // Factory to get provider instance - keeps provider-specific code isolated
@@ -8,9 +9,7 @@ const providers: Record<ProviderName, () => MusicProvider> = {
   apple_music: () => {
     throw new ProviderUnsupportedOperationError("apple_music", "Apple Music provider not yet implemented");
   },
-  youtube_music: () => {
-    throw new ProviderUnsupportedOperationError("youtube_music", "YouTube Music provider not yet implemented");
-  },
+  youtube_music: () => new YouTubeMusicProvider(),
   tidal: () => {
     throw new ProviderUnsupportedOperationError("tidal", "Tidal provider not yet implemented");
   },
@@ -29,7 +28,7 @@ export function getProvider(name: ProviderName): MusicProvider {
 
 export function getSupportedProviders(): ProviderName[] {
   // Only return implemented providers
-  return ["spotify"];
+  return ["spotify", "youtube_music"];
 }
 
 export function isProviderSupported(name: string): name is ProviderName {
