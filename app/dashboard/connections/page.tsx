@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Music, Link2, Shield, AlertCircle, CheckCircle } from "lucide-react";
 import { ConnectButton } from "@/components/connections/connect-button";
+import { DisconnectButton } from "@/components/connections/disconnect-button";
 
 export default async function ConnectionsPage({
   searchParams,
@@ -164,28 +165,35 @@ export default async function ConnectionsPage({
             ) : (
               <div className="space-y-3">
                 {spotifyAccounts.map((acc) => (
-                  <div key={acc.id} className="border p-4 rounded-xl flex justify-between items-center hover:bg-accent/50 transition-colors">
-                    <div className="flex gap-3 min-w-0 flex-1">
-                      <div className="w-10 h-10 rounded-full bg-[#1DB954]/10 flex items-center justify-center flex-shrink-0">
-                        <Music className="w-5 h-5 text-[#1DB954]" aria-hidden="true" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="font-medium truncate flex items-center gap-2">
-                          {acc.displayName || acc.providerAccountId}
-                          {acc.isActive && <CheckCircle className="w-4 h-4 text-accent" aria-hidden="true" />}
+                  <div key={acc.id} className="border p-4 rounded-xl flex flex-col gap-3 hover:bg-accent/30 transition-colors">
+                    <div className="flex justify-between items-center gap-3">
+                      <div className="flex gap-3 min-w-0 flex-1">
+                        <div className="w-10 h-10 rounded-full bg-[#1DB954]/10 flex items-center justify-center flex-shrink-0">
+                          <Music className="w-5 h-5 text-[#1DB954]" aria-hidden="true" />
                         </div>
-                        <div className="text-xs text-muted-foreground truncate">{acc.providerAccountEmail || acc.providerAccountId}</div>
-                        <div className="flex gap-2 mt-1">
-                          <Badge variant={acc.isActive ? "success" : "secondary"} className="text-[10px]">
-                            {acc.isActive ? "Active" : "Inactive"}
-                          </Badge>
-                          {acc.product && <Badge variant="outline" className="text-[10px]">{acc.product}</Badge>}
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium truncate flex items-center gap-2">
+                            {acc.displayName || acc.providerAccountId}
+                            {acc.isActive && <CheckCircle className="w-4 h-4 text-accent" aria-hidden="true" />}
+                          </div>
+                          <div className="text-xs text-muted-foreground truncate">{acc.providerAccountEmail || acc.providerAccountId}</div>
+                          <div className="flex gap-2 mt-1">
+                            <Badge variant={acc.isActive ? "success" : "secondary"} className="text-[10px]">
+                              {acc.isActive ? "Active" : "Inactive"}
+                            </Badge>
+                            {acc.product && <Badge variant="outline" className="text-[10px]">{acc.product}</Badge>}
+                          </div>
                         </div>
                       </div>
+                      <DisconnectButton
+                        accountId={acc.id}
+                        displayName={acc.displayName || acc.providerAccountId}
+                        provider={acc.provider}
+                        variant="outline"
+                        size="sm"
+                        className="ml-2 flex-shrink-0"
+                      />
                     </div>
-                    <Button variant="outline" size="sm" className="ml-2 flex-shrink-0" aria-label={`Disconnect ${acc.displayName || acc.providerAccountId}`}>
-                      Disconnect
-                    </Button>
                   </div>
                 ))}
                 <ConnectButton provider="spotify" label="Connect another Spotify account" variant="outline" size="sm" className="w-full" />
