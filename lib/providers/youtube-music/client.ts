@@ -1,18 +1,13 @@
 /**
- * YouTube Music Provider Implementation via YouTube Data API v3
+ * YouTube Music Provider Implementation via YouTube Data API v3 - Improved Matching
  * Official docs: https://developers.google.com/youtube/v3
  * 
- * Important: YouTube Music doesn't have official separate API - YouTube Data API manages YouTube playlists
- * which appear in YouTube Music. For playlist transfer, YouTube playlists are used.
- * 
- * Capabilities:
- * - OAuth: Google OAuth 2.0 Authorization Code Flow
- * - Scopes: https://www.googleapis.com/auth/youtube (read/write) - minimal for playlist transfer
- * - Pagination: pageToken based, not offset
- * - Rate limit: Quota based (10k units/day default), 403 quotaExceeded, 429 rateLimitExceeded
- * - Add tracks: 1 per request (playlistItems.insert), not batched
- * - Search: search.list returns videos, not ISRC - searchSupportsISRC false, confidence lower
- * - Privacy: public, private, unlisted
+ * Improvements for matching:
+ * - Clean YouTube titles: remove (Official Video), (Official Audio), (Lyric Video), [4K], etc.
+ * - Parse artist/title intelligently: handles Artist - Title, Artist - Topic - Title, Title - Artist
+ * - Fetch video durations via videos.list batched (max 50 per call) for duration tolerance matching
+ * - Search with improved queries: official audio, topic channels, etc.
+ * - Capabilities: maxTracksPerAddRequest 1, searchSupportsISRC false, but duration and cleaned titles improve confidence
  */
 
 import {
@@ -29,27 +24,25 @@ import {
 } from "../types";
 import {
   ProviderAuthenticationError,
-  ProviderPermissionError,
   ProviderNotFoundError,
   ProviderRateLimitError,
   ProviderTransientError,
-  ProviderUnsupportedOperationError,
   translateHttpError,
 } from "../errors";
+import { cleanYouTubeTitle, parseYouTubeTitle } from "@/lib/sync/normalizer";
 
 const YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3";
 const GOOGLE_AUTH_BASE = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_BASE = "https://oauth2.googleapis.com/token";
 
 export const YOUTUBE_SCOPES = [
-  "https://www.googleapis.com/auth/youtube", // read/write playlists
-  "https://www.googleapis.com/auth/youtube.readonly", // readonly fallback
+  "https://www.googleapis.com/auth/youtube",
+  "https://www.googleapis.com/auth/youtube.readonly",
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile",
 ];
 
 function getClientId(): string {
-  // Prefer YOUTUBE_CLIENT_ID, fallback to GOOGLE_CLIENT_ID for auth
   const id = process.env.YOUTUBE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
   if (!id) throw new Error("YOUTUBE_CLIENT_ID or GOOGLE_CLIENT_ID not set");
   return id;
@@ -86,7 +79,7 @@ interface YouTubePlaylist {
     itemCount?: number;
   };
   status?: {
-    privacyStatus?: string; // public, private, unlisted
+    privacyStatus?: string;
   };
 }
 
@@ -98,7 +91,7 @@ interface YouTubePlaylistItem {
     playlistId: string;
     position: number;
     resourceId: {
-      kind: string; // youtube#video
+      kind: string;
       videoId: string;
     };
     videoOwnerChannelTitle?: string;
@@ -110,7 +103,6 @@ interface YouTubePlaylistItem {
   };
   contentDetails?: {
     videoId?: string;
-    videoPublishedAt?: string;
   };
 }
 
@@ -127,7 +119,7 @@ interface YouTubeVideo {
     };
   };
   contentDetails?: {
-    duration?: string; // ISO 8601 PT4M13S
+    duration?: string;
   };
 }
 
@@ -148,7 +140,6 @@ interface YouTubeSearchResult {
 
 function parseISO8601Duration(duration?: string): number | undefined {
   if (!duration) return undefined;
-  // PT4M13S -> milliseconds
   const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
   if (!match) return undefined;
   const hours = parseInt(match[1] || "0", 10);
@@ -169,57 +160,91 @@ function mapYouTubePlaylistToNormalized(p: YouTubePlaylist, provider: ProviderNa
     imageUrl: p.snippet.thumbnails?.high?.url || p.snippet.thumbnails?.medium?.url || p.snippet.thumbnails?.default?.url,
     trackCount: p.contentDetails?.itemCount,
     isPublic,
-    isCollaborative: false, // YouTube doesn't have collaborative in same sense
+    isCollaborative: false,
     url: `https://www.youtube.com/playlist?list=${p.id}`,
     raw: p,
   };
 }
 
-function mapYouTubePlaylistItemToNormalized(item: YouTubePlaylistItem, provider: ProviderName = "youtube_music"): NormalizedTrack {
-  // YouTube playlist items are videos - we treat videoId as trackId
-  // Title often contains "Artist - Title" or just Title
-  const title = item.snippet.title;
-  // Try to parse artist from title or use channelTitle as artist fallback
-  let artists: string[] = [];
-  if (item.snippet.videoOwnerChannelTitle) {
-    artists = [item.snippet.videoOwnerChannelTitle.replace(" - Topic", "").trim()];
-  } else if (title.includes(" - ")) {
-    const parts = title.split(" - ");
-    if (parts.length >= 2) {
-      artists = [parts[0].trim()];
-    }
+function mapYouTubePlaylistItemToNormalized(
+  item: YouTubePlaylistItem,
+  videoDetails?: Map<string, YouTubeVideo>,
+  provider: ProviderName = "youtube_music"
+): NormalizedTrack {
+  const rawTitle = item.snippet.title;
+  const channelTitle = item.snippet.videoOwnerChannelTitle;
+
+  // Use improved parser that cleans YouTube tags and extracts artist/title intelligently
+  const parsed = parseYouTubeTitle(rawTitle, channelTitle);
+
+  // Get duration from videoDetails if available
+  let durationMs: number | undefined;
+  const video = videoDetails?.get(item.snippet.resourceId.videoId);
+  if (video?.contentDetails?.duration) {
+    durationMs = parseISO8601Duration(video.contentDetails.duration);
   }
 
-  if (artists.length === 0) {
-    artists = ["Unknown Artist"];
-  }
+  // Clean title for final display but keep parsed title for matching
+  const cleanedTitle = cleanYouTubeTitle(rawTitle);
+  // Use parsed title if it seems more like actual song title (not containing channel name)
+  const finalTitle = parsed.title.length > 2 ? parsed.title : cleanedTitle;
 
   return {
     provider,
     providerTrackId: item.snippet.resourceId.videoId,
-    title: title,
-    artists,
-    album: undefined, // YouTube doesn't have album in same sense
-    durationMs: undefined, // Need additional videos.list call to get duration
-    isrc: undefined, // YouTube doesn't provide ISRC
+    title: finalTitle,
+    artists: [parsed.artist],
+    album: undefined,
+    durationMs,
+    isrc: undefined,
     url: `https://www.youtube.com/watch?v=${item.snippet.resourceId.videoId}`,
     imageUrl: item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url,
-    raw: item,
+    raw: {
+      playlistItem: item,
+      videoDetails: video,
+      originalTitle: rawTitle,
+      cleanedTitle,
+      parsed,
+    },
   };
 }
 
-function mapYouTubeSearchToNormalized(result: YouTubeSearchResult, provider: ProviderName = "youtube_music"): NormalizedTrack {
+function mapYouTubeSearchToNormalized(
+  result: YouTubeSearchResult,
+  videoDetails?: Map<string, YouTubeVideo>,
+  provider: ProviderName = "youtube_music"
+): NormalizedTrack {
+  const rawTitle = result.snippet.title;
+  const channelTitle = result.snippet.channelTitle;
+
+  const parsed = parseYouTubeTitle(rawTitle, channelTitle);
+
+  let durationMs: number | undefined;
+  const video = videoDetails?.get(result.id.videoId);
+  if (video?.contentDetails?.duration) {
+    durationMs = parseISO8601Duration(video.contentDetails.duration);
+  }
+
+  const cleanedTitle = cleanYouTubeTitle(rawTitle);
+  const finalTitle = parsed.title.length > 2 ? parsed.title : cleanedTitle;
+
   return {
     provider,
     providerTrackId: result.id.videoId,
-    title: result.snippet.title,
-    artists: result.snippet.channelTitle ? [result.snippet.channelTitle.replace(" - Topic", "").trim()] : ["Unknown Artist"],
+    title: finalTitle,
+    artists: [parsed.artist],
     album: undefined,
-    durationMs: undefined,
+    durationMs,
     isrc: undefined,
     url: `https://www.youtube.com/watch?v=${result.id.videoId}`,
     imageUrl: result.snippet.thumbnails?.default?.url,
-    raw: result,
+    raw: {
+      searchResult: result,
+      videoDetails: video,
+      originalTitle: rawTitle,
+      cleanedTitle,
+      parsed,
+    },
   };
 }
 
@@ -236,6 +261,59 @@ async function youtubeFetch(accessToken: string, path: string, options: RequestI
   return res;
 }
 
+/**
+ * Batch fetch video details to get durations for better matching
+ * YouTube videos.list costs 1 quota per call, max 50 IDs per call
+ */
+async function fetchVideoDetails(
+  accessToken: string,
+  videoIds: string[]
+): Promise<Map<string, YouTubeVideo>> {
+  const detailsMap = new Map<string, YouTubeVideo>();
+
+  if (videoIds.length === 0) return detailsMap;
+
+  // Batch into chunks of 50 (YouTube max)
+  const chunks: string[][] = [];
+  for (let i = 0; i < videoIds.length; i += 50) {
+    chunks.push(videoIds.slice(i, i + 50));
+  }
+
+  for (const chunk of chunks) {
+    try {
+      const params = new URLSearchParams({
+        part: "snippet,contentDetails",
+        id: chunk.join(","),
+      });
+
+      const res = await youtubeFetch(accessToken, `/videos?${params.toString()}`);
+
+      if (!res.ok) {
+        const body = await res.text();
+        console.warn(`Failed to fetch video details for chunk: ${body.slice(0, 200)}`);
+        continue;
+      }
+
+      const data = (await res.json()) as {
+        items: YouTubeVideo[];
+      };
+
+      for (const video of data.items) {
+        detailsMap.set(video.id, video);
+      }
+
+      // Small delay to respect quota
+      if (chunks.length > 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    } catch (err) {
+      console.warn(`Error fetching video details chunk`, err);
+    }
+  }
+
+  return detailsMap;
+}
+
 export class YouTubeMusicProvider implements MusicProvider {
   readonly name: ProviderName = "youtube_music";
 
@@ -248,9 +326,9 @@ export class YouTubeMusicProvider implements MusicProvider {
       canRemoveTracks: true,
       supportsPublicPrivatePlaylists: true,
       supportsCollaborativePlaylists: false,
-      maxTracksPerAddRequest: 1, // YouTube playlistItems.insert is 1 per request
-      maxTracksPerPlaylist: 5000, // YouTube limit
-      searchSupportsISRC: false, // YouTube search doesn't support ISRC, only text
+      maxTracksPerAddRequest: 1,
+      maxTracksPerPlaylist: 5000,
+      searchSupportsISRC: false,
     };
   }
 
@@ -261,8 +339,8 @@ export class YouTubeMusicProvider implements MusicProvider {
       scope: scopes.join(" "),
       redirect_uri: redirectUri,
       state,
-      access_type: "offline", // To get refresh_token
-      prompt: "consent", // Force consent to get refresh_token
+      access_type: "offline",
+      prompt: "consent",
     });
     return `${GOOGLE_AUTH_BASE}?${params.toString()}`;
   }
@@ -312,7 +390,6 @@ export class YouTubeMusicProvider implements MusicProvider {
     });
 
     if (!res.ok) {
-      const text = await res.text();
       if (res.status === 400 || res.status === 401) {
         throw new ProviderAuthenticationError("youtube_music", "Refresh token invalid");
       }
@@ -328,7 +405,6 @@ export class YouTubeMusicProvider implements MusicProvider {
   }
 
   async getCurrentUser(accessToken: string): Promise<ProviderUser> {
-    // Use Google userinfo endpoint to get user
     const res = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -347,7 +423,6 @@ export class YouTubeMusicProvider implements MusicProvider {
       picture?: string;
     };
 
-    // Also try to get YouTube channel info
     let channelTitle: string | undefined;
     try {
       const channelRes = await youtubeFetch(accessToken, "/channels?part=snippet&mine=true");
@@ -368,7 +443,6 @@ export class YouTubeMusicProvider implements MusicProvider {
   }
 
   async listPlaylists(accessToken: string, cursor?: string, limit: number = 50): Promise<PlaylistPage> {
-    // YouTube uses pageToken for pagination
     const params = new URLSearchParams({
       part: "snippet,contentDetails,status",
       mine: "true",
@@ -383,13 +457,10 @@ export class YouTubeMusicProvider implements MusicProvider {
 
     if (!res.ok) {
       const body = await res.text();
-      // Handle quota errors
       if (body.includes("quotaExceeded") || body.includes("rateLimitExceeded")) {
         const retryAfter = res.headers.get("Retry-After");
         let retryAfterMs: number | undefined;
-        if (retryAfter) {
-          retryAfterMs = parseInt(retryAfter, 10) * 1000;
-        }
+        if (retryAfter) retryAfterMs = parseInt(retryAfter, 10) * 1000;
         throw new ProviderRateLimitError("youtube_music", retryAfterMs, `YouTube quota/rate limit: ${body.slice(0, 200)}`);
       }
       throw translateHttpError("youtube_music", res.status, body, Object.fromEntries(res.headers.entries()));
@@ -405,12 +476,11 @@ export class YouTubeMusicProvider implements MusicProvider {
 
     const playlists = data.items.map((p) => mapYouTubePlaylistToNormalized(p));
     const hasMore = !!data.nextPageToken;
-    const nextCursor = data.nextPageToken;
 
     return {
       playlists,
       hasMore,
-      nextCursor,
+      nextCursor: data.nextPageToken,
       total: data.pageInfo?.totalResults,
     };
   }
@@ -446,9 +516,7 @@ export class YouTubeMusicProvider implements MusicProvider {
       maxResults: Math.min(limit, 50).toString(),
     });
 
-    if (cursor) {
-      params.set("pageToken", cursor);
-    }
+    if (cursor) params.set("pageToken", cursor);
 
     const res = await youtubeFetch(accessToken, `/playlistItems?${params.toString()}`);
 
@@ -468,63 +536,126 @@ export class YouTubeMusicProvider implements MusicProvider {
       };
     };
 
-    const tracks = data.items
-      .filter((item) => item.snippet.resourceId.kind === "youtube#video" && item.snippet.resourceId.videoId)
-      .map((item) => mapYouTubePlaylistItemToNormalized(item));
+    const validItems = data.items.filter(
+      (item) => item.snippet.resourceId.kind === "youtube#video" && item.snippet.resourceId.videoId
+    );
 
-    const hasMore = !!data.nextPageToken;
-    const nextCursor = data.nextPageToken;
+    // Improved: Fetch video details to get durations for better matching
+    const videoIds = validItems.map((item) => item.snippet.resourceId.videoId);
+    let videoDetails: Map<string, YouTubeVideo> | undefined;
+
+    try {
+      videoDetails = await fetchVideoDetails(accessToken, videoIds);
+      console.log(`Fetched details for ${videoDetails.size}/${videoIds.length} YouTube videos for duration matching`);
+    } catch (err) {
+      console.warn("Failed to fetch video details for playlist tracks, proceeding without durations", err);
+    }
+
+    const tracks = validItems.map((item) => mapYouTubePlaylistItemToNormalized(item, videoDetails));
 
     return {
       tracks,
-      hasMore,
-      nextCursor,
+      hasMore: !!data.nextPageToken,
+      nextCursor: data.nextPageToken,
       total: data.pageInfo?.totalResults,
     };
   }
 
   async searchTracks(accessToken: string, query: SearchQuery, limit: number = 5): Promise<NormalizedTrack[]> {
-    // Build query: title + artist
-    // YouTube search doesn't support ISRC, so use text search
-    let q = "";
+    // Improved search queries for better matching
+    // Priority 1: If ISRC available, search with title + artist (ISRC not supported by YouTube but we can use metadata)
+    // Priority 2: Title + artist + album with official audio hint
+    // Priority 3: Multiple query variations to increase confidence
+
+    const queries: string[] = [];
+
+    // Build primary query: title + first artist
     if (query.title) {
-      q = query.title;
-      if (query.artists.length > 0) {
-        q += ` ${query.artists[0]}`;
-      }
-      if (query.album) {
-        q += ` ${query.album}`;
-      }
-    } else {
-      q = query.artists.join(" ");
+      let primary = `${query.title} ${query.artists[0] || ""}`.trim();
+      // Add album if available for disambiguation
+      if (query.album) primary += ` ${query.album}`;
+      queries.push(primary);
     }
 
-    // Add "official" to improve matching for music
-    q += " official";
-
-    const params = new URLSearchParams({
-      part: "snippet",
-      q,
-      type: "video",
-      maxResults: Math.min(limit, 10).toString(),
-      videoCategoryId: "10", // Music category
-    });
-
-    const res = await youtubeFetch(accessToken, `/search?${params.toString()}`);
-
-    if (!res.ok) {
-      const body = await res.text();
-      if (body.includes("quotaExceeded")) {
-        throw new ProviderRateLimitError("youtube_music", undefined, `YouTube quota exceeded: ${body.slice(0, 200)}`);
-      }
-      throw translateHttpError("youtube_music", res.status, body, Object.fromEntries(res.headers.entries()));
+    // Secondary: title only (for cases where artist parsing failed)
+    if (query.title) {
+      queries.push(query.title);
     }
 
-    const data = (await res.json()) as {
-      items: YouTubeSearchResult[];
-    };
+    // Tertiary: artist + title reversed (some YouTube titles are Title - Artist)
+    if (query.title && query.artists[0]) {
+      queries.push(`${query.artists[0]} ${query.title}`);
+    }
 
-    return data.items.map((item) => mapYouTubeSearchToNormalized(item));
+    // For YouTube, we will try first query with official audio hint, but also try without
+    const allCandidates: NormalizedTrack[] = [];
+    const seenVideoIds = new Set<string>();
+
+    for (let qIdx = 0; qIdx < Math.min(queries.length, 2); qIdx++) {
+      let q = queries[qIdx];
+
+      // First query: add "official audio" to prefer clean audio tracks over lyric videos
+      if (qIdx === 0) {
+        q += " official audio";
+      }
+
+      const params = new URLSearchParams({
+        part: "snippet",
+        q,
+        type: "video",
+        maxResults: Math.min(limit, 10).toString(),
+        videoCategoryId: "10",
+        // Prefer more relevant results
+        order: "relevance",
+      });
+
+      try {
+        const res = await youtubeFetch(accessToken, `/search?${params.toString()}`);
+
+        if (!res.ok) {
+          const body = await res.text();
+          if (body.includes("quotaExceeded")) {
+            throw new ProviderRateLimitError("youtube_music", undefined, `Quota exceeded: ${body.slice(0, 200)}`);
+          }
+          console.warn(`YouTube search failed for query "${q}": ${body.slice(0, 200)}`);
+          continue;
+        }
+
+        const data = (await res.json()) as {
+          items: YouTubeSearchResult[];
+        };
+
+        // Collect video IDs for batch details fetch
+        const videoIds = data.items.map((item) => item.id.videoId).filter(Boolean);
+
+        // Fetch details for duration matching
+        let videoDetails: Map<string, YouTubeVideo> | undefined;
+        try {
+          videoDetails = await fetchVideoDetails(accessToken, videoIds);
+        } catch {}
+
+        for (const item of data.items) {
+          if (!seenVideoIds.has(item.id.videoId)) {
+            seenVideoIds.add(item.id.videoId);
+            allCandidates.push(mapYouTubeSearchToNormalized(item, videoDetails));
+          }
+        }
+
+        // If we got good candidates from first query, stop
+        if (allCandidates.length >= limit) break;
+
+        // Small delay between search queries to respect quota
+        if (qIdx < queries.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      } catch (err) {
+        if (err instanceof ProviderRateLimitError) throw err;
+        console.warn(`Search query "${q}" failed`, err);
+      }
+    }
+
+    // Return up to limit candidates
+    return allCandidates.slice(0, limit);
   }
 
   async createPlaylist(accessToken: string, input: CreatePlaylistInput): Promise<NormalizedPlaylist> {
@@ -556,8 +687,6 @@ export class YouTubeMusicProvider implements MusicProvider {
   }
 
   async addTracks(accessToken: string, playlistId: string, trackIds: string[], position?: number): Promise<void> {
-    // YouTube requires 1 request per track (playlistItems.insert)
-    // Batch handling: loop through trackIds
     for (let i = 0; i < trackIds.length; i++) {
       const videoId = trackIds[i];
       const body: any = {
@@ -570,9 +699,7 @@ export class YouTubeMusicProvider implements MusicProvider {
         },
       };
 
-      if (position !== undefined) {
-        body.snippet.position = position + i;
-      }
+      if (position !== undefined) body.snippet.position = position + i;
 
       const res = await youtubeFetch(accessToken, "/playlistItems?part=snippet", {
         method: "POST",
@@ -587,8 +714,6 @@ export class YouTubeMusicProvider implements MusicProvider {
         throw translateHttpError("youtube_music", res.status, respBody, Object.fromEntries(res.headers.entries()));
       }
 
-      // Small delay to respect rate limits (YouTube quota is strict)
-      // 100ms delay between inserts
       if (i < trackIds.length - 1) {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
@@ -596,26 +721,12 @@ export class YouTubeMusicProvider implements MusicProvider {
   }
 
   async removeTracks(accessToken: string, playlistId: string, trackIds: string[]): Promise<void> {
-    // Need to find playlistItem IDs for given videoIds
-    // First, list playlist items to get their IDs
-    // For simplicity, we assume trackIds are playlistItem IDs? But per interface, they should be providerTrackIds (videoIds)
-    // So we need to search for playlistItems with those videoIds
-
-    // For MVP, we will list all items and find matching videoIds, then delete
-    // This is inefficient but works for small playlists
-    // For large playlists, need better approach with pagination
-
     const videoIdSet = new Set(trackIds);
     let cursor: string | undefined;
     let hasMore = true;
     const itemsToDelete: string[] = [];
 
     while (hasMore && itemsToDelete.length < trackIds.length) {
-      const page = await this.getPlaylistTracks(accessToken, playlistId, cursor, 50);
-      
-      // Need to get actual playlistItem IDs, not videoIds
-      // Our getPlaylistTracks returns normalized tracks with videoId as providerTrackId, but we lose playlistItem ID
-      // So we need to fetch raw playlistItems again
       const params = new URLSearchParams({
         part: "snippet",
         playlistId,
@@ -644,7 +755,6 @@ export class YouTubeMusicProvider implements MusicProvider {
       cursor = data.nextPageToken;
     }
 
-    // Delete each playlistItem
     for (const itemId of itemsToDelete) {
       const res = await youtubeFetch(accessToken, `/playlistItems?id=${encodeURIComponent(itemId)}`, {
         method: "DELETE",

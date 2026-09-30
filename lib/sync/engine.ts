@@ -74,8 +74,9 @@ export interface SyncEngineResult {
 export class SyncEngine {
   private matcher: TrackMatcher;
 
-  constructor(matcherThreshold: number = 70) {
-    this.matcher = new TrackMatcher(matcherThreshold);
+  constructor(matcherThreshold: number = 70, youtubeThreshold: number = 60) {
+    // Improved: lower threshold for YouTube (60) because no ISRC and noisy titles, higher for others (70)
+    this.matcher = new TrackMatcher(matcherThreshold, youtubeThreshold);
   }
 
   async execute(input: SyncEngineInput): Promise<SyncEngineResult> {
