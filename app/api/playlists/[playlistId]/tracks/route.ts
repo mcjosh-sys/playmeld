@@ -50,8 +50,19 @@ export async function GET(req: NextRequest, { params }: { params: { playlistId: 
       return NextResponse.json({ error: "Account is disconnected, please reconnect" }, { status: 400 });
     }
 
+    if (account.accessTokenEncrypted === "DISCONNECTED") {
+      return NextResponse.json({ error: "Account disconnected, tokens cleared. Please reconnect." }, { status: 400 });
+    }
+
+    let accessToken: string;
+    try {
+      accessToken = decryptToken(account.accessTokenEncrypted);
+    } catch (decryptErr) {
+      console.error(`Failed to decrypt token for account ${accountId}`, decryptErr instanceof Error ? decryptErr.message : decryptErr);
+      return NextResponse.json({ error: "Failed to decrypt token, please reconnect" }, { status: 401 });
+    }
+
     const provider = getProvider(account.provider as any);
-    let accessToken = decryptToken(account.accessTokenEncrypted);
 
     // Helper to handle token refresh
     const fetchWithRefresh = async (token: string, attempt = 0): Promise<any> => {

@@ -125,13 +125,13 @@ function mapSpotifyPlaylistToNormalized(p: SpotifyPlaylist, provider: ProviderNa
     providerPlaylistId: p.id,
     name: p.name,
     description: p.description || undefined,
-    ownerName: p.owner.display_name || p.owner.id,
-    ownerId: p.owner.id,
+    ownerName: p.owner?.display_name || p.owner?.id || "Unknown",
+    ownerId: p.owner?.id,
     imageUrl: p.images?.[0]?.url,
-    trackCount: p.tracks.total,
+    trackCount: p.tracks?.total ?? 0,
     isPublic: p.public ?? undefined,
-    isCollaborative: p.collaborative,
-    url: p.external_urls.spotify,
+    isCollaborative: p.collaborative ?? false,
+    url: p.external_urls?.spotify,
     snapshotId: p.snapshot_id,
     raw: p,
   };
@@ -266,7 +266,6 @@ export class SpotifyProvider implements MusicProvider {
   }
 
   async listPlaylists(accessToken: string, cursor?: string, limit: number = 50): Promise<PlaylistPage> {
-    // cursor is offset as string for simplicity
     const offset = cursor ? parseInt(cursor, 10) : 0;
     if (isNaN(offset)) throw new Error("Invalid cursor");
 
@@ -281,23 +280,49 @@ export class SpotifyProvider implements MusicProvider {
       throw translateHttpError("spotify", res.status, body, Object.fromEntries(res.headers.entries()));
     }
 
-    const data = (await res.json()) as {
-      items: SpotifyPlaylist[];
-      next: string | null;
-      total: number;
-      limit: number;
-      offset: number;
-    };
+    let data: any;
+    try {
+      data = await res.json();
+    } catch (err) {
+      console.error("Failed to parse Spotify playlists JSON", err);
+      throw new ProviderTransientError("spotify", "Invalid JSON from Spotify");
+    }
 
-    const playlists = data.items.map((p) => mapSpotifyPlaylistToNormalized(p));
-    const hasMore = data.next !== null;
+    // Robust handling: data might be undefined or have different shape
+    if (!data || typeof data !== "object") {
+      console.error("Spotify playlists data is not an object", data);
+      return {
+        playlists: [],
+        hasMore: false,
+        total: 0,
+      };
+    }
+
+    const items = data.items || [];
+    const playlists = items.map((p: any) => {
+      try {
+        return mapSpotifyPlaylistToNormalized(p);
+      } catch (mapErr) {
+        console.warn("Failed to map Spotify playlist", mapErr, p);
+        // Return minimal normalized playlist to avoid crashing
+        return {
+          provider: "spotify" as ProviderName,
+          providerPlaylistId: p.id || "unknown",
+          name: p.name || "Unknown Playlist",
+          trackCount: 0,
+          raw: p,
+        } as NormalizedPlaylist;
+      }
+    });
+
+    const hasMore = data.next !== null && data.next !== undefined;
     const nextCursor = hasMore ? (data.offset + data.limit).toString() : undefined;
 
     return {
       playlists,
       hasMore,
       nextCursor,
-      total: data.total,
+      total: data.total ?? items.length,
     };
   }
 
@@ -313,6 +338,8 @@ export class SpotifyProvider implements MusicProvider {
 
   async getPlaylistTracks(accessToken: string, playlistId: string, cursor?: string, limit: number = 100): Promise<TrackPage> {
     const offset = cursor ? parseInt(cursor, 10) : 0;
+    if (isNaN(offset)) throw new Error("Invalid cursor");
+
     const params = new URLSearchParams({
       limit: Math.min(limit, 100).toString(),
       offset: offset.toString(),
@@ -328,27 +355,46 @@ export class SpotifyProvider implements MusicProvider {
       throw translateHttpError("spotify", res.status, body, Object.fromEntries(res.headers.entries()));
     }
 
-    const data = (await res.json()) as {
-      items: SpotifyPlaylistTrack[];
-      next: string | null;
-      total: number;
-      limit: number;
-      offset: number;
-    };
+    let data: any;
+    try {
+      data = await res.json();
+    } catch (err) {
+      console.error("Failed to parse Spotify playlist tracks JSON", err);
+      throw new ProviderTransientError("spotify", "Invalid JSON from Spotify tracks");
+    }
 
-    const tracks = data.items
-      .map((item) => item.track)
-      .filter((t): t is SpotifyTrack => t !== null && t.id !== null)
-      .map((t) => mapSpotifyTrackToNormalized(t));
+    if (!data || typeof data !== "object") {
+      console.error("Spotify playlist tracks data is not an object", data);
+      return {
+        tracks: [],
+        hasMore: false,
+        total: 0,
+      };
+    }
 
-    const hasMore = data.next !== null;
+    const items = data.items || [];
+
+    const tracks = items
+      .map((item: any) => item.track)
+      .filter((t: any): t is SpotifyTrack => t !== null && t !== undefined && t.id !== null && t.id !== undefined)
+      .map((t: any) => {
+        try {
+          return mapSpotifyTrackToNormalized(t);
+        } catch (mapErr) {
+          console.warn("Failed to map Spotify track", mapErr, t);
+          return null;
+        }
+      })
+      .filter((t: any): t is NormalizedTrack => t !== null);
+
+    const hasMore = data.next !== null && data.next !== undefined;
     const nextCursor = hasMore ? (data.offset + data.limit).toString() : undefined;
 
     return {
       tracks,
       hasMore,
       nextCursor,
-      total: data.total,
+      total: data.total ?? items.length,
     };
   }
 
