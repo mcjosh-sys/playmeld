@@ -12,28 +12,76 @@ export async function GET(req: NextRequest, { params }: { params: { provider: st
 
   const providerName = params.provider as any;
   const { searchParams } = new URL(req.url);
-  const state = searchParams.get("state");
-
-  if (!state) {
-    return NextResponse.json({ error: "Missing state" }, { status: 400 });
-  }
+  let state = searchParams.get("state");
 
   try {
-    // Validate state contains correct userId (server-side identity check)
-    const decoded = JSON.parse(Buffer.from(state, "base64url").toString());
-    if (decoded.userId !== session.user.id) {
-      return NextResponse.json({ error: "Invalid state - user mismatch" }, { status: 403 });
+    let finalState = state;
+
+    // If state is missing or invalid, generate a new secure state server-side
+    // This handles cases where user directly navigates or state=test placeholder
+    if (!state) {
+      console.log(`No state provided for ${providerName}, generating new state for user ${session.user.id}`);
+      finalState = Buffer.from(
+        JSON.stringify({
+          userId: session.user.id,
+          provider: providerName,
+          nonce: Math.random().toString(36).substring(2, 15),
+          timestamp: Date.now(),
+        })
+      ).toString("base64url");
+    } else {
+      // Try to validate existing state
+      try {
+        const decoded = JSON.parse(Buffer.from(state, "base64url").toString());
+        
+        // Validate userId matches authenticated user - security check
+        if (decoded.userId && decoded.userId !== session.user.id) {
+          console.error(`State user mismatch: expected ${session.user.id}, got ${decoded.userId}`);
+          return NextResponse.json({ error: "Invalid state - user mismatch" }, { status: 403 });
+        }
+
+        // If decoded doesn't have userId (e.g., old format or test), generate new
+        if (!decoded.userId) {
+          console.log(`State missing userId, generating new state for user ${session.user.id}`);
+          finalState = Buffer.from(
+            JSON.stringify({
+              userId: session.user.id,
+              provider: providerName,
+              nonce: decoded.nonce || Math.random().toString(36).substring(2, 15),
+              timestamp: Date.now(),
+            })
+          ).toString("base64url");
+        } else {
+          // Valid state, use as is
+          finalState = state;
+        }
+      } catch (parseErr) {
+        // Invalid base64 or JSON - generate new state instead of failing
+        // This fixes the "Unexpected token" error when state=test
+        console.log(`Invalid state format (likely test placeholder), generating new state for user ${session.user.id}: ${parseErr instanceof Error ? parseErr.message : parseErr}`);
+        finalState = Buffer.from(
+          JSON.stringify({
+            userId: session.user.id,
+            provider: providerName,
+            nonce: Math.random().toString(36).substring(2, 15),
+            timestamp: Date.now(),
+          })
+        ).toString("base64url");
+      }
     }
 
     const provider = getProvider(providerName);
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXTAUTH_URL || "http://localhost:3000";
     const redirectUri = `${appUrl}/api/connected-accounts/callback/${providerName}`;
 
-    const authUrl = provider.getAuthorizationUrl(state, redirectUri);
+    const authUrl = provider.getAuthorizationUrl(finalState!, redirectUri);
+
+    console.log(`Redirecting user ${session.user.id} to ${providerName} auth, redirectUri: ${redirectUri}`);
 
     return NextResponse.redirect(authUrl);
   } catch (err) {
-    console.error("Error in provider authorize", err);
-    return NextResponse.json({ error: "Failed to generate authorization URL" }, { status: 500 });
+    console.error("Error in provider authorize", err instanceof Error ? err.message : err);
+    // Safe error - don't expose secrets
+    return NextResponse.json({ error: "Failed to generate authorization URL. Check SPOTIFY_CLIENT_ID/SECRET env vars." }, { status: 500 });
   }
 }

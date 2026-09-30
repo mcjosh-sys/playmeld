@@ -5,10 +5,14 @@ import { eq } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Music, Link2, Shield, AlertCircle, CheckCircle, ExternalLink } from "lucide-react";
-import Link from "next/link";
+import { Music, Link2, Shield, AlertCircle, CheckCircle } from "lucide-react";
+import { ConnectButton } from "@/components/connections/connect-button";
 
-export default async function ConnectionsPage() {
+export default async function ConnectionsPage({
+  searchParams,
+}: {
+  searchParams: { success?: string; error?: string; desc?: string; provider?: string };
+}) {
   const session = await auth();
   if (!session?.user?.id) return null;
 
@@ -25,6 +29,43 @@ export default async function ConnectionsPage() {
         <h1 className="hierarchy-1">Connected Accounts</h1>
         <p className="text-muted-foreground leading-relaxed">Link your music platforms to start syncing with BullMQ background jobs</p>
       </div>
+
+      {/* Success/Error Messages */}
+      {searchParams.success === "connected" && (
+        <Card className="border-green-500/50 bg-green-50 dark:bg-green-950 animate-enter">
+          <CardContent className="pt-6">
+            <div className="flex gap-3">
+              <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0" aria-hidden="true" />
+              <div>
+                <p className="text-sm font-medium text-green-900 dark:text-green-100">Successfully connected!</p>
+                <p className="text-sm text-green-700 dark:text-green-300">Your account is now linked and tokens are encrypted at rest.</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {searchParams.error && (
+        <Card className="border-destructive/50 bg-destructive/10 animate-enter">
+          <CardContent className="pt-6">
+            <div className="flex gap-3">
+              <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0" aria-hidden="true" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-destructive">Connection failed: {searchParams.error}</p>
+                {searchParams.desc && <p className="text-xs text-muted-foreground">{searchParams.desc}</p>}
+                {searchParams.provider && <p className="text-xs text-muted-foreground">Provider: {searchParams.provider}</p>}
+                <div className="text-xs text-muted-foreground mt-2 space-y-1">
+                  <p>Common fixes:</p>
+                  <p>• Check SPOTIFY_CLIENT_ID/SECRET env vars are set</p>
+                  <p>• Verify redirect URI in Spotify Dashboard matches: https://intensely-actual-chipmunk.ngrok-free.app/api/connected-accounts/callback/spotify</p>
+                  <p>• For local dev, ensure ngrok is running with canonical hostname</p>
+                  <p>• Check NEXT_PUBLIC_APP_URL and NEXTAUTH_URL match your current URL</p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats */}
       <div className="grid md:grid-cols-3 gap-4 animate-enter stagger-1">
@@ -99,12 +140,7 @@ export default async function ConnectionsPage() {
                     <p className="text-sm font-medium">No Spotify account connected</p>
                     <p className="text-xs text-muted-foreground mt-1">Connect to start syncing playlists with smart matching</p>
                   </div>
-                  <Link href="/api/connected-accounts/spotify/authorize?state=test" className="inline-block">
-                    <Button size="default" className="gap-2">
-                      <Link2 className="w-4 h-4" aria-hidden="true" />
-                      Connect Spotify
-                    </Button>
-                  </Link>
+                  <ConnectButton provider="spotify" label="Connect Spotify" size="default" />
                 </div>
 
                 <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 space-y-2">
@@ -114,7 +150,13 @@ export default async function ConnectionsPage() {
                       <p className="font-medium text-blue-900 dark:text-blue-100">Local dev requires ngrok:</p>
                       <p className="text-blue-700 dark:text-blue-300 font-mono text-[11px]">https://intensely-actual-chipmunk.ngrok-free.app</p>
                       <p className="text-blue-700 dark:text-blue-300">Configure redirect URI in Spotify Dashboard:</p>
-                      <p className="font-mono text-[11px] bg-white/50 dark:bg-black/20 p-1 rounded">https://intensely-actual-chipmunk.ngrok-free.app/api/connected-accounts/callback/spotify</p>
+                      <p className="font-mono text-[11px] bg-white/50 dark:bg-black/20 p-1 rounded break-all">
+                        https://intensely-actual-chipmunk.ngrok-free.app/api/connected-accounts/callback/spotify
+                      </p>
+                      <p className="text-blue-700 dark:text-blue-300 mt-2">Also add to Google OAuth if using Google login:</p>
+                      <p className="font-mono text-[11px] bg-white/50 dark:bg-black/20 p-1 rounded break-all">
+                        https://intensely-actual-chipmunk.ngrok-free.app/api/auth/callback/google
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -146,12 +188,7 @@ export default async function ConnectionsPage() {
                     </Button>
                   </div>
                 ))}
-                <Link href="/api/connected-accounts/spotify/authorize?state=test" className="block">
-                  <Button variant="outline" size="sm" className="w-full gap-2">
-                    <Link2 className="w-4 h-4" aria-hidden="true" />
-                    Connect another Spotify account
-                  </Button>
-                </Link>
+                <ConnectButton provider="spotify" label="Connect another Spotify account" variant="outline" size="sm" className="w-full" />
               </div>
             )}
           </CardContent>
@@ -228,7 +265,7 @@ export default async function ConnectionsPage() {
             </div>
             <div className="flex gap-2">
               <CheckCircle className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" aria-hidden="true" />
-              <span className="text-xs">OAuth state validation with userId + timestamp prevents replay</span>
+              <span className="text-xs">OAuth state validation with userId + timestamp prevents replay - fixed invalid state handling</span>
             </div>
           </div>
         </CardContent>
