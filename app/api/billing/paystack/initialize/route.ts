@@ -4,12 +4,15 @@ import { db } from "@/lib/db";
 import { workspaces } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { initializeTransaction } from "@/lib/billing/paystack";
+import { getAppUrl } from "@/lib/url";
+import { PLANS, PlanId } from "@/lib/billing/plans";
 import { z } from "zod";
 
 export const runtime = "nodejs";
 
 const schema = z.object({
-  planCode: z.string().min(1),
+  planId: z.enum(["free", "starter", "pro", "enterprise"]),
+  billingInterval: z.enum(["monthly", "yearly"]).default("monthly"),
   email: z.string().email(),
 });
 
@@ -26,14 +29,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid input", details: parsed.error.issues }, { status: 400 });
     }
 
-    const { planCode, email } = parsed.data;
+    const { planId, billingInterval, email } = parsed.data;
 
-    // Verify email matches authenticated user (prevent using other's email)
     if (email.toLowerCase() !== session.user.email.toLowerCase()) {
       return NextResponse.json({ error: "Email must match authenticated user" }, { status: 400 });
     }
 
-    // Get or create workspace for user
+    if (planId === "free") {
+      return NextResponse.json({ error: "Free plan doesn't require payment" }, { status: 400 });
+    }
+
+    const plan = PLANS[planId as PlanId];
+    if (!plan) {
+      return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
+    }
+
     let [workspace] = await db
       .select()
       .from(workspaces)
@@ -41,8 +51,7 @@ export async function POST(req: NextRequest) {
       .limit(1);
 
     if (!workspace) {
-      // Create default workspace
-      const slug = `ws-${session.user.id.slice(0, 8)}`;
+      const slug = `ws-${session.user.id.slice(0, 8)}-${Date.now().toString(36)}`;
       [workspace] = await db
         .insert(workspaces)
         .values({
@@ -54,30 +63,50 @@ export async function POST(req: NextRequest) {
         .returning();
     }
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const appUrl = getAppUrl(req);
+    const pricing = billingInterval === "yearly" ? plan.pricing.yearly : plan.pricing.monthly;
+    const paystackPlanCode = billingInterval === "yearly" ? plan.pricing.paystackYearlyPlanCode : plan.pricing.paystackMonthlyPlanCode;
 
-    // Initialize Paystack transaction - secret key stays server-side
+    // If Paystack plan code exists, use it (amount determined by plan), else use amount directly
+    const amount = paystackPlanCode ? 0 : pricing.amount; // 0 if plan code used, else amount in kobo
+
+    console.log(`[Billing] Initializing Paystack for user ${session.user.id}, plan ${planId} ${billingInterval}, amount ${pricing.amount}, planCode ${paystackPlanCode}, appUrl ${appUrl}`);
+
     const result = await initializeTransaction({
       email,
-      amount: 0, // For plan subscription, amount is determined by plan
-      plan: planCode,
-      callback_url: `${appUrl}/dashboard/settings?paystack=callback`,
+      amount,
+      plan: paystackPlanCode || undefined,
+      callback_url: `${appUrl}/dashboard/settings?paystack=callback&plan=${planId}&interval=${billingInterval}`,
       metadata: {
         userId: session.user.id,
         workspaceId: workspace.id,
-        planCode,
+        planId,
+        billingInterval,
+        planCode: paystackPlanCode || `${planId}_${billingInterval}`,
+        amount: pricing.amount,
+        currency: pricing.currency,
         custom_fields: [
           {
             display_name: "Workspace ID",
             variable_name: "workspace_id",
             value: workspace.id,
           },
+          {
+            display_name: "Plan",
+            variable_name: "plan_id",
+            value: planId,
+          },
+          {
+            display_name: "Billing Interval",
+            variable_name: "billing_interval",
+            value: billingInterval,
+          },
         ],
       },
     });
 
     if (!result.status) {
-      return NextResponse.json({ error: "Failed to initialize transaction" }, { status: 500 });
+      return NextResponse.json({ error: "Failed to initialize transaction", details: result.message }, { status: 500 });
     }
 
     return NextResponse.json({
@@ -85,10 +114,14 @@ export async function POST(req: NextRequest) {
         authorization_url: result.data.authorization_url,
         access_code: result.data.access_code,
         reference: result.data.reference,
+        planId,
+        billingInterval,
+        amount: pricing.amount,
+        display: pricing.display,
       },
     });
   } catch (err) {
-    console.error("Paystack initialize error", err instanceof Error ? err.message : err);
-    return NextResponse.json({ error: "Failed to initialize payment" }, { status: 500 });
+    console.error("Paystack initialize error", err instanceof Error ? err.message : err, err instanceof Error ? err.stack?.slice(0, 500) : "");
+    return NextResponse.json({ error: "Failed to initialize payment", details: err instanceof Error ? err.message.slice(0, 200) : "Unknown" }, { status: 500 });
   }
 }
