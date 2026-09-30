@@ -19,15 +19,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
   ];
 
   return (
-    <div className="min-h-screen flex bg-background">
+    <div className="h-screen flex overflow-hidden bg-background">
       {/* Skip link for keyboard users */}
       <a href="#main-content" className="skip-link">
         Skip to main content
       </a>
 
-      {/* Sidebar - Desktop */}
-      <aside className="w-72 border-r bg-card/50 backdrop-blur-sm p-6 hidden lg:flex flex-col sticky top-0 h-screen safe-top safe-bottom">
-        <div className="flex items-center gap-3 mb-10">
+      {/* Sidebar - Desktop - Fixed, not scrolling with main */}
+      <aside className="w-72 border-r bg-card/80 backdrop-blur-xl p-6 hidden lg:flex flex-col flex-shrink-0 h-screen overflow-y-auto safe-top safe-bottom">
+        <div className="flex items-center gap-3 mb-10 flex-shrink-0">
           <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-primary-foreground font-bold shadow-glow">
             <Music className="w-5 h-5" aria-hidden="true" />
           </div>
@@ -37,7 +37,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         </div>
 
-        <nav className="space-y-2 flex-1" aria-label="Main navigation">
+        <nav className="space-y-2 flex-1 overflow-y-auto" aria-label="Main navigation">
           {navItems.map((item) => {
             const Icon = item.icon;
             return (
@@ -54,7 +54,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
           })}
         </nav>
 
-        <div className="mt-auto pt-8 border-t space-y-4">
+        <div className="mt-auto pt-8 border-t space-y-4 flex-shrink-0">
           <div className="px-4 py-3 rounded-xl bg-muted/50">
             <div className="text-sm font-medium truncate" title={session.user.name || session.user.email || ""}>
               {session.user.name || "User"}
@@ -77,10 +77,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </div>
       </aside>
 
-      {/* Main */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Mobile header */}
-        <header className="lg:hidden border-b bg-card/80 backdrop-blur-md sticky top-0 z-40 safe-top">
+      {/* Main - Scrollable independently, sidebar stays fixed */}
+      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
+        {/* Mobile header - sticky within main scroll */}
+        <header className="lg:hidden border-b bg-card/90 backdrop-blur-xl sticky top-0 z-40 safe-top flex-shrink-0">
           <div className="flex justify-between items-center p-4">
             <Link href="/dashboard" className="flex items-center gap-2 font-bold focus-ring rounded-xl p-2 -m-2" aria-label="Go to dashboard">
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-primary-foreground">
@@ -96,12 +96,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         </header>
 
-        <main id="main-content" className="flex-1 p-4 sm:p-6 lg:p-8 container-playmeld animate-enter" tabIndex={-1}>
+        <main id="main-content" className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 container-playmeld animate-enter" tabIndex={-1}>
           {children}
+          {/* Spacer for mobile bottom nav */}
+          <div className="lg:hidden h-24" aria-hidden="true" />
         </main>
 
-        {/* Mobile bottom nav - ≤5 items, labels with icons, 44x44 min */}
-        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-card/90 backdrop-blur-xl border-t z-50 safe-bottom" aria-label="Mobile navigation">
+        {/* Mobile bottom nav - fixed, not scrolling with content */}
+        <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-card/95 backdrop-blur-xl border-t z-50 safe-bottom" aria-label="Mobile navigation">
           <div className="flex justify-around items-center py-2 px-2">
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -119,9 +121,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
             })}
           </div>
         </nav>
-
-        {/* Spacer for mobile bottom nav */}
-        <div className="lg:hidden h-20" aria-hidden="true" />
       </div>
     </div>
   );
