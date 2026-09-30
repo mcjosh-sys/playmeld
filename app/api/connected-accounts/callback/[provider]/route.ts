@@ -22,16 +22,19 @@ export async function GET(req: NextRequest, { params }: { params: { provider: st
   const error = searchParams.get("error");
   const errorDescription = searchParams.get("error_description");
 
+  // Use helper that respects NEXTAUTH_URL and ngrok host header - fixes localhost redirect bug
+  const appUrl = getAppUrl(req);
+
   if (error) {
-    console.error(`OAuth error for ${providerName}: ${error} - ${errorDescription}`);
+    console.error(`OAuth error for ${providerName}: ${error} - ${errorDescription}, appUrl: ${appUrl}`);
     return NextResponse.redirect(
-      new URL(`/dashboard/connections?error=${encodeURIComponent(error)}&desc=${encodeURIComponent(errorDescription || "")}`, req.url)
+      new URL(`/dashboard/connections?error=${encodeURIComponent(error)}&desc=${encodeURIComponent(errorDescription || "")}`, appUrl)
     );
   }
 
   if (!code || !state) {
-    console.error(`Missing code or state for ${providerName}`);
-    return NextResponse.redirect(new URL("/dashboard/connections?error=missing_code_or_state", req.url));
+    console.error(`Missing code or state for ${providerName}, appUrl: ${appUrl}`);
+    return NextResponse.redirect(new URL("/dashboard/connections?error=missing_code_or_state", appUrl));
   }
 
   try {
@@ -40,37 +43,35 @@ export async function GET(req: NextRequest, { params }: { params: { provider: st
       decoded = JSON.parse(Buffer.from(state, "base64url").toString());
     } catch (parseErr) {
       console.error(`Invalid state format in callback for ${providerName}: ${parseErr instanceof Error ? parseErr.message : parseErr}`);
-      return NextResponse.redirect(new URL("/dashboard/connections?error=invalid_state_format", req.url));
+      return NextResponse.redirect(new URL("/dashboard/connections?error=invalid_state_format", appUrl));
     }
 
     if (!decoded.userId) {
       console.error(`State missing userId in callback for ${providerName}`);
-      return NextResponse.redirect(new URL("/dashboard/connections?error=invalid_state_no_user", req.url));
+      return NextResponse.redirect(new URL("/dashboard/connections?error=invalid_state_no_user", appUrl));
     }
 
     if (decoded.userId !== session.user.id) {
       console.error("State user mismatch", { expected: session.user.id, got: decoded.userId });
-      return NextResponse.redirect(new URL("/dashboard/connections?error=invalid_state_user_mismatch", req.url));
+      return NextResponse.redirect(new URL("/dashboard/connections?error=invalid_state_user_mismatch", appUrl));
     }
 
     if (decoded.timestamp && Date.now() - decoded.timestamp > 10 * 60 * 1000) {
       console.warn(`State expired for ${providerName}, age: ${Date.now() - decoded.timestamp}ms`);
-      return NextResponse.redirect(new URL("/dashboard/connections?error=state_expired", req.url));
+      return NextResponse.redirect(new URL("/dashboard/connections?error=state_expired", appUrl));
     }
 
     if (decoded.provider && decoded.provider !== providerName) {
       console.error(`State provider mismatch: expected ${providerName}, got ${decoded.provider}`);
-      return NextResponse.redirect(new URL("/dashboard/connections?error=provider_mismatch", req.url));
+      return NextResponse.redirect(new URL("/dashboard/connections?error=provider_mismatch", appUrl));
     }
 
     const provider = getProvider(providerName);
     
-    // Use helper that prioritizes NEXTAUTH_URL - must match exactly the URI used in authorize step
-    // Fixes bug where localhost was used even when NEXTAUTH_URL set to ngrok, causing Spotify to reject
+    // Must match exactly the URI used in authorize step or Spotify rejects
     const redirectUri = getRedirectUri(req, providerName);
-    const appUrl = getAppUrl(req);
 
-    console.log(`[Callback] Exchanging code for ${providerName}, user ${session.user.id}, appUrl: ${appUrl}, redirectUri: ${redirectUri}, NEXTAUTH_URL: ${process.env.NEXTAUTH_URL}`);
+    console.log(`[Callback] Exchanging code for ${providerName}, user ${session.user.id}, appUrl: ${appUrl}, redirectUri: ${redirectUri}, NEXTAUTH_URL: ${process.env.NEXTAUTH_URL}, host: ${req.headers.get("host")}`);
 
     let tokens;
     try {
@@ -78,7 +79,7 @@ export async function GET(req: NextRequest, { params }: { params: { provider: st
     } catch (tokenErr) {
       console.error(`Token exchange failed for ${providerName}, redirectUri: ${redirectUri}`, tokenErr instanceof Error ? tokenErr.message : tokenErr);
       return NextResponse.redirect(
-        new URL(`/dashboard/connections?error=token_exchange_failed&provider=${providerName}&redirectUri=${encodeURIComponent(redirectUri)}`, req.url)
+        new URL(`/dashboard/connections?error=token_exchange_failed&provider=${providerName}&redirectUri=${encodeURIComponent(redirectUri)}`, appUrl)
       );
     }
 
@@ -87,7 +88,7 @@ export async function GET(req: NextRequest, { params }: { params: { provider: st
       providerUser = await provider.getCurrentUser(tokens.accessToken);
     } catch (userErr) {
       console.error(`Failed to get provider user for ${providerName}`, userErr instanceof Error ? userErr.message : userErr);
-      return NextResponse.redirect(new URL(`/dashboard/connections?error=failed_to_get_user&provider=${providerName}`, req.url));
+      return NextResponse.redirect(new URL(`/dashboard/connections?error=failed_to_get_user&provider=${providerName}`, appUrl));
     }
 
     const accessTokenEncrypted = encryptToken(tokens.accessToken);
@@ -143,9 +144,12 @@ export async function GET(req: NextRequest, { params }: { params: { provider: st
       console.log(`Created new connected account ${newAccount.id} for user ${session.user.id}, provider ${providerName}`);
     }
 
-    return NextResponse.redirect(new URL("/dashboard/connections?success=connected", req.url));
+    // Fix: Use appUrl (which respects NEXTAUTH_URL and ngrok host) not req.url (which can be localhost)
+    // Previously new URL(..., req.url) caused redirect to https://localhost:3000 even when accessed via ngrok
+    console.log(`[Callback] Success, redirecting to ${appUrl}/dashboard/connections?success=connected`);
+    return NextResponse.redirect(new URL("/dashboard/connections?success=connected", appUrl));
   } catch (err) {
     console.error(`Failed to complete OAuth for ${providerName}`, err instanceof Error ? err.message : err, err instanceof Error ? err.stack : "");
-    return NextResponse.redirect(new URL(`/dashboard/connections?error=oauth_failed&provider=${providerName}`, req.url));
+    return NextResponse.redirect(new URL(`/dashboard/connections?error=oauth_failed&provider=${providerName}`, appUrl));
   }
 }
