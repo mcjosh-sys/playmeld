@@ -330,9 +330,15 @@ export class SpotifyProvider implements MusicProvider {
     const res = await spotifyFetch(accessToken, `/playlists/${encodeURIComponent(playlistId)}`);
     if (!res.ok) {
       const body = await res.text();
+      console.error(`[Spotify] getPlaylist ${playlistId} failed ${res.status}: ${body.slice(0, 500)}`);
       throw translateHttpError("spotify", res.status, body, Object.fromEntries(res.headers.entries()));
     }
-    const data = (await res.json()) as SpotifyPlaylist;
+    let data: any;
+    try {
+      data = await res.json();
+    } catch {
+      throw new ProviderTransientError("spotify", "Invalid JSON from Spotify playlist");
+    }
     return mapSpotifyPlaylistToNormalized(data);
   }
 

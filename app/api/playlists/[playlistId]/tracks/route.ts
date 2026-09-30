@@ -96,9 +96,25 @@ export async function GET(req: NextRequest, { params }: { params: { playlistId: 
       }
     };
 
+    // First, try to get playlist details to check ownership - helps with 403 debugging
+    // Per Spotify docs: Get Playlist Items only accessible for owned or collaborative playlists, 403 if neither
+    let playlistDetails: any = null;
+    try {
+      playlistDetails = await provider.getPlaylist(accessToken, playlistId);
+      console.log(`[Tracks] Playlist ${playlistId} details: ownerId=${playlistDetails.ownerId}, ownerName=${playlistDetails.ownerName}, isPublic=${playlistDetails.isPublic}, isCollaborative=${playlistDetails.isCollaborative}, providerAccountId=${account.providerAccountId}`);
+    } catch (playlistErr: any) {
+      console.warn(`[Tracks] Failed to get playlist details for ${playlistId}, will still try tracks:`, playlistErr.message);
+      // Continue to try tracks even if details fail - details might also 403
+    }
+
     const result = await fetchWithRefresh(accessToken);
 
-    return NextResponse.json({ data: result });
+    return NextResponse.json({ 
+      data: {
+        ...result,
+        playlist: playlistDetails, // Include playlist details for UI
+      }
+    });
   } catch (err: any) {
     console.error("Error getting playlist tracks", err instanceof Error ? err.message : err, `code: ${err.code}, provider: ${err.provider}`);
 
@@ -108,25 +124,33 @@ export async function GET(req: NextRequest, { params }: { params: { playlistId: 
     }
 
     if (err.code === "PERMISSION_ERROR" || err.message?.includes("Forbidden") || err.message?.includes("403")) {
-      // For public playlists still returning 403, likely token has old scopes without playlist-read-private
-      // Suggest reconnecting to get new scopes
       const errMessage = err.message || "";
       const isSpotify = err.provider === "spotify" || errMessage.toLowerCase().includes("spotify") || errMessage.toLowerCase().includes("forbidden");
       
+      // Check if this is Spotify's owner/collaborator restriction
+      // Per Spotify docs: Get Playlist Items only accessible for owned or collaborative playlists, 403 if neither
+      const isOwnerRestriction = isSpotify && (errMessage.includes("Forbidden") || err.code === "PERMISSION_ERROR");
+      
       return NextResponse.json(
         {
-          error: "Forbidden: You don't have permission to access this playlist",
+          error: "Forbidden: You don't have permission to access this playlist tracks",
           details: isSpotify
-            ? `Public playlist ${params.playlistId} still 403. Possible causes: 1) Your Spotify access token was obtained before we added playlist-read-private/collaborative scopes - disconnect and reconnect Spotify to get new scopes with offline access. 2) Playlist is collaborative and you're not a collaborator. 3) Market restriction (we now retry without market param). 4) Spotify API sometimes returns 403 for public playlists not in your library - try following the playlist first on Spotify app, then retry. 5) Token expired and refresh failed.`
+            ? isOwnerRestriction
+              ? `Spotify API restriction: Get Playlist Items endpoint is ONLY accessible for playlists owned by current user or where user is collaborator. Returns 403 if neither owner nor collaborator, even if playlist is public. Your playlist ${params.playlistId} is public but you are not owner/collaborator, so Spotify returns 403 Forbidden. This is documented at https://developer.spotify.com/documentation/web-api/reference/get-playlists-items - Note: This endpoint is only accessible for playlists owned by current user or collaborative.`
+              : `Public playlist ${params.playlistId} 403. Possible causes: 1) Old token without playlist-read-private/collaborative scopes - disconnect and reconnect Spotify. 2) Collaborative not collaborator. 3) Market restriction (we retry without market). 4) Not in library - follow first. 5) Token expired.`
             : "Possible causes: playlist is private and not owned, missing scopes, or not in your library.",
           provider: err.provider,
           code: err.code,
           playlistId: params.playlistId,
           accountId,
+          spotifyRestriction: isOwnerRestriction ? "Spotify only allows reading tracks for owned or collaborative playlists, even if public." : undefined,
           help: isSpotify
-            ? "Fix: Go to /dashboard/connections -> Disconnect Spotify account -> Reconnect Spotify (will request playlist-read-private, playlist-read-collaborative, playlist-modify-private, playlist-modify-public, user-read-email, user-read-private with offline access). Then try again. Also try following the public playlist on Spotify app first."
-            : "For YouTube: Ensure playlist is owned by connected YouTube account (mine=true).",
-          requiresReconnect: isSpotify,
+            ? isOwnerRestriction
+              ? "Fix: Use owned playlist as source. In Spotify app, create new playlist you own, add tracks from public playlist, then sync owned copy. Or ask owner to add you as collaborator. Or follow playlist first then retry."
+              : "Fix: Disconnect and reconnect Spotify to get new scopes with offline access, then follow public playlist first."
+            : "For YouTube: Ensure playlist is owned by connected account.",
+          requiresReconnect: false,
+          isOwnerRestriction,
         },
         { status: 403 }
       );

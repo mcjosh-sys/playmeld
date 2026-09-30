@@ -416,14 +416,28 @@ export function PlaylistBrowser({ accounts }: PlaylistBrowserProps) {
                   {tracksErrorDetails && (
                     <p className="text-muted-foreground break-words leading-relaxed">{tracksErrorDetails}</p>
                   )}
-                  {tracksError.toLowerCase().includes("forbidden") && (
-                    <div className="text-muted-foreground space-y-1 border-t pt-2 mt-2">
-                      <p className="font-medium">Possible fixes:</p>
-                      <p>• This playlist may be private and not owned by your connected Spotify account (ID: {selectedPlaylist?.providerPlaylistId})</p>
-                      <p>• Try a playlist you own, or a public playlist</p>
-                      <p>• Check Spotify scopes: need playlist-read-private and playlist-read-collaborative (already requested)</p>
-                      <p>• For YouTube: Ensure playlist is owned by connected YouTube account (mine=true)</p>
-                      <p>• Playlist ID {selectedPlaylist?.providerPlaylistId} might be invalid or from another user</p>
+                  {(tracksError.toLowerCase().includes("forbidden") || tracksError.toLowerCase().includes("permission")) && (
+                    <div className="text-muted-foreground space-y-2 border-t pt-3 mt-3">
+                      <p className="font-medium text-foreground">Why this happens (Spotify API restriction):</p>
+                      <div className="bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800 p-3 rounded-xl space-y-1">
+                        <p className="text-yellow-800 dark:text-yellow-200 font-medium">Spotify only allows reading tracks for owned or collaborative playlists</p>
+                        <p className="text-yellow-700 dark:text-yellow-300 text-[11px] leading-relaxed">Per Spotify docs: Get Playlist Items endpoint is ONLY accessible for playlists owned by current user or where user is collaborator. Returns 403 if neither, even if public. This is documented at developer.spotify.com/documentation/web-api/reference/get-playlists-items</p>
+                      </div>
+                      <p className="font-medium text-foreground mt-3">Possible fixes:</p>
+                      <p>• <span className="font-medium">Use owned playlist as source:</span> In Spotify app, create new playlist you own, add all tracks from public playlist {selectedPlaylist?.providerPlaylistId}, then sync owned copy (ID: {selectedPlaylist?.providerPlaylistId})</p>
+                      <p>• <span className="font-medium">Ask owner to add you as collaborator:</span> Make playlist collaborative and invite your account {selectedAccount?.providerAccountId}</p>
+                      <p>• <span className="font-medium">Follow playlist first:</span> On Spotify app, follow public playlist, then retry - sometimes helps but new API still requires owner/collaborator</p>
+                      <p>• <span className="font-medium">Check scopes:</span> Need playlist-read-private and playlist-read-collaborative - disconnect and reconnect Spotify to get new scopes with offline access</p>
+                      <p>• For YouTube: Ensure playlist is owned (mine=true)</p>
+                      <p>• Playlist ID {selectedPlaylist?.providerPlaylistId} owned by another user - need to be owner or collaborator per Spotify policy</p>
+                      <div className="flex gap-2 mt-3">
+                        <Button size="sm" variant="outline" onClick={() => window.open(`https://open.spotify.com/playlist/${selectedPlaylist?.providerPlaylistId}`, '_blank')}>
+                          Open on Spotify
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => window.open('https://developer.spotify.com/documentation/web-api/reference/get-playlists-items', '_blank')}>
+                          View Spotify Docs
+                        </Button>
+                      </div>
                     </div>
                   )}
                   <Button size="sm" variant="outline" className="mt-3" onClick={() => selectedPlaylist && fetchTracks(selectedPlaylist.providerPlaylistId)}>
