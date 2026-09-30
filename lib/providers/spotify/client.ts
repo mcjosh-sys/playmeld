@@ -340,18 +340,40 @@ export class SpotifyProvider implements MusicProvider {
     const offset = cursor ? parseInt(cursor, 10) : 0;
     if (isNaN(offset)) throw new Error("Invalid cursor");
 
-    const params = new URLSearchParams({
-      limit: Math.min(limit, 100).toString(),
-      offset: offset.toString(),
-      market: "from_token",
-    });
+    // Try with market=from_token first, if 403 try without market (some public playlists fail with market param)
+    const tryFetch = async (withMarket: boolean): Promise<Response> => {
+      const params = new URLSearchParams({
+        limit: Math.min(limit, 100).toString(),
+        offset: offset.toString(),
+      });
+      if (withMarket) params.set("market", "from_token");
 
-    const res = await spotifyFetch(
-      accessToken,
-      `/playlists/${encodeURIComponent(playlistId)}/tracks?${params.toString()}`
-    );
+      const url = `/playlists/${encodeURIComponent(playlistId)}/tracks?${params.toString()}`;
+      console.log(`[Spotify] Fetching playlist tracks ${playlistId} withMarket=${withMarket}, url: ${url}, offset: ${offset}`);
+
+      return spotifyFetch(accessToken, url);
+    };
+
+    let res = await tryFetch(true);
+
+    // If 403 Forbidden with market param, retry without market - some public playlists require no market
+    if (!res.ok && res.status === 403) {
+      const body = await res.text();
+      console.warn(`[Spotify] Playlist tracks ${playlistId} 403 with market=from_token, retrying without market. Body: ${body.slice(0, 300)}`);
+      
+      // Try without market
+      res = await tryFetch(false);
+      
+      if (!res.ok) {
+        const body2 = await res.text();
+        console.error(`[Spotify] Playlist tracks ${playlistId} still 403 without market. Body: ${body2.slice(0, 500)}`);
+        throw translateHttpError("spotify", res.status, body2, Object.fromEntries(res.headers.entries()));
+      }
+    }
+
     if (!res.ok) {
       const body = await res.text();
+      console.error(`[Spotify] Playlist tracks ${playlistId} failed ${res.status}: ${body.slice(0, 500)}`);
       throw translateHttpError("spotify", res.status, body, Object.fromEntries(res.headers.entries()));
     }
 

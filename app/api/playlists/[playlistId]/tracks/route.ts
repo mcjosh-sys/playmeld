@@ -108,13 +108,25 @@ export async function GET(req: NextRequest, { params }: { params: { playlistId: 
     }
 
     if (err.code === "PERMISSION_ERROR" || err.message?.includes("Forbidden") || err.message?.includes("403")) {
+      // For public playlists still returning 403, likely token has old scopes without playlist-read-private
+      // Suggest reconnecting to get new scopes
+      const errMessage = err.message || "";
+      const isSpotify = err.provider === "spotify" || errMessage.toLowerCase().includes("spotify") || errMessage.toLowerCase().includes("forbidden");
+      
       return NextResponse.json(
         {
           error: "Forbidden: You don't have permission to access this playlist",
-          details: "Possible causes: playlist is private and not owned by connected account, missing scopes (need playlist-read-private, playlist-read-collaborative), or market restriction. Try with a playlist you own or a public playlist.",
+          details: isSpotify
+            ? `Public playlist ${params.playlistId} still 403. Possible causes: 1) Your Spotify access token was obtained before we added playlist-read-private/collaborative scopes - disconnect and reconnect Spotify to get new scopes with offline access. 2) Playlist is collaborative and you're not a collaborator. 3) Market restriction (we now retry without market param). 4) Spotify API sometimes returns 403 for public playlists not in your library - try following the playlist first on Spotify app, then retry. 5) Token expired and refresh failed.`
+            : "Possible causes: playlist is private and not owned, missing scopes, or not in your library.",
           provider: err.provider,
           code: err.code,
-          help: "For Spotify: Ensure playlist is owned by connected account or is public/collaborative. Check scopes in Spotify Dashboard. For YouTube: Ensure playlist is owned by connected YouTube account (mine=true).",
+          playlistId: params.playlistId,
+          accountId,
+          help: isSpotify
+            ? "Fix: Go to /dashboard/connections -> Disconnect Spotify account -> Reconnect Spotify (will request playlist-read-private, playlist-read-collaborative, playlist-modify-private, playlist-modify-public, user-read-email, user-read-private with offline access). Then try again. Also try following the public playlist on Spotify app first."
+            : "For YouTube: Ensure playlist is owned by connected YouTube account (mine=true).",
+          requiresReconnect: isSpotify,
         },
         { status: 403 }
       );
