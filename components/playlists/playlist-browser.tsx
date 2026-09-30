@@ -135,10 +135,13 @@ export function PlaylistBrowser({ accounts }: PlaylistBrowserProps) {
     fetchTracks(playlist.providerPlaylistId);
   };
 
+  const [tracksErrorDetails, setTracksErrorDetails] = useState<string | null>(null);
+
   const fetchTracks = async (playlistId: string, cursor?: string) => {
     if (!selectedAccountId) return;
     setTracksLoading(true);
     setTracksError(null);
+    setTracksErrorDetails(null);
 
     try {
       const params = new URLSearchParams({
@@ -150,7 +153,13 @@ export function PlaylistBrowser({ accounts }: PlaylistBrowserProps) {
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error || "Failed to fetch tracks");
+        // Handle 403 Forbidden with helpful details
+        if (res.status === 403) {
+          const errorMsg = data.error || "Forbidden: No permission to access this playlist";
+          const details = data.details || data.help || "Playlist may be private and not owned by connected account, or missing scopes.";
+          throw new Error(`${errorMsg} | ${details}`);
+        }
+        throw new Error(data.error || data.details || "Failed to fetch tracks");
       }
 
       const result = data.data;
@@ -159,7 +168,15 @@ export function PlaylistBrowser({ accounts }: PlaylistBrowserProps) {
       setNextCursorTracks(result.nextCursor);
     } catch (err) {
       console.error("Fetch tracks error", err);
-      setTracksError(err instanceof Error ? err.message : "Failed to fetch tracks");
+      const message = err instanceof Error ? err.message : "Failed to fetch tracks";
+      // Split error and details if contains |
+      if (message.includes(" | ")) {
+        const [main, details] = message.split(" | ");
+        setTracksError(main);
+        setTracksErrorDetails(details);
+      } else {
+        setTracksError(message);
+      }
       setTracks([]);
     } finally {
       setTracksLoading(false);
@@ -392,12 +409,24 @@ export function PlaylistBrowser({ accounts }: PlaylistBrowserProps) {
             ) : tracksLoading ? (
               <SkeletonList count={5} />
             ) : tracksError ? (
-              <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 flex gap-2">
-                <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0 mt-0.5" aria-hidden="true" />
-                <div className="text-xs flex-1 min-w-0">
-                  <p className="font-medium text-destructive">Failed to load tracks</p>
-                  <p className="text-muted-foreground break-words">{tracksError}</p>
-                  <Button size="sm" variant="outline" className="mt-2" onClick={() => selectedPlaylist && fetchTracks(selectedPlaylist.providerPlaylistId)}>
+              <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/20 flex gap-3">
+                <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" aria-hidden="true" />
+                <div className="text-xs flex-1 min-w-0 space-y-2">
+                  <p className="font-medium text-destructive">Failed to load tracks: {tracksError}</p>
+                  {tracksErrorDetails && (
+                    <p className="text-muted-foreground break-words leading-relaxed">{tracksErrorDetails}</p>
+                  )}
+                  {tracksError.toLowerCase().includes("forbidden") && (
+                    <div className="text-muted-foreground space-y-1 border-t pt-2 mt-2">
+                      <p className="font-medium">Possible fixes:</p>
+                      <p>• This playlist may be private and not owned by your connected Spotify account (ID: {selectedPlaylist?.providerPlaylistId})</p>
+                      <p>• Try a playlist you own, or a public playlist</p>
+                      <p>• Check Spotify scopes: need playlist-read-private and playlist-read-collaborative (already requested)</p>
+                      <p>• For YouTube: Ensure playlist is owned by connected YouTube account (mine=true)</p>
+                      <p>• Playlist ID {selectedPlaylist?.providerPlaylistId} might be invalid or from another user</p>
+                    </div>
+                  )}
+                  <Button size="sm" variant="outline" className="mt-3" onClick={() => selectedPlaylist && fetchTracks(selectedPlaylist.providerPlaylistId)}>
                     Retry
                   </Button>
                 </div>

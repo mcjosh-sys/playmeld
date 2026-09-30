@@ -81,12 +81,34 @@ export async function GET(req: NextRequest, { params }: { params: { playlistId: 
     const playlist = await fetchWithRefresh(accessToken);
 
     return NextResponse.json({ data: playlist });
-  } catch (err) {
-    console.error("Error getting playlist", err instanceof Error ? err.message : err);
-    const message = err instanceof Error ? err.message : "Failed to get playlist";
-    if (message.includes("not found") || message.includes("Not found")) {
-      return NextResponse.json({ error: "Playlist not found" }, { status: 404 });
+  } catch (err: any) {
+    console.error("Error getting playlist", err instanceof Error ? err.message : err, `code: ${err.code}`);
+
+    if (err.code === "NOT_FOUND" || err.message?.includes("not found") || err.message?.includes("Not found")) {
+      return NextResponse.json({ error: "Playlist not found - it may have been deleted or is private" }, { status: 404 });
     }
-    return NextResponse.json({ error: message.slice(0, 200) }, { status: 500 });
+
+    if (err.code === "PERMISSION_ERROR" || err.message?.includes("Forbidden") || err.message?.includes("403")) {
+      return NextResponse.json(
+        {
+          error: "Forbidden: You don't have permission to access this playlist",
+          details: "Possible causes: playlist is private and not owned by connected account, missing scopes, or market restriction.",
+          provider: err.provider,
+          code: err.code,
+        },
+        { status: 403 }
+      );
+    }
+
+    if (err.code === "AUTHENTICATION_ERROR") {
+      return NextResponse.json({ error: "Authentication failed, please reconnect account" }, { status: 401 });
+    }
+
+    if (err.code === "RATE_LIMIT") {
+      return NextResponse.json({ error: `Rate limited, retry after ${err.retryAfterMs || "unknown"}ms` }, { status: 429 });
+    }
+
+    const message = err instanceof Error ? err.message : "Failed to get playlist";
+    return NextResponse.json({ error: message.slice(0, 300) }, { status: 500 });
   }
 }

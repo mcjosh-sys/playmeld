@@ -99,14 +99,40 @@ export async function GET(req: NextRequest, { params }: { params: { playlistId: 
     const result = await fetchWithRefresh(accessToken);
 
     return NextResponse.json({ data: result });
-  } catch (err) {
-    console.error("Error getting playlist tracks", err instanceof Error ? err.message : err);
-    // Safe error - no tokens
-    const message = err instanceof Error ? err.message : "Failed to get playlist tracks";
-    // Distinguish not found vs other errors
-    if (message.includes("not found") || message.includes("Not found")) {
-      return NextResponse.json({ error: "Playlist not found" }, { status: 404 });
+  } catch (err: any) {
+    console.error("Error getting playlist tracks", err instanceof Error ? err.message : err, `code: ${err.code}, provider: ${err.provider}`);
+
+    // Handle specific provider errors with proper status codes and helpful messages
+    if (err.code === "NOT_FOUND" || err.message?.includes("not found") || err.message?.includes("Not found")) {
+      return NextResponse.json({ error: "Playlist not found - it may have been deleted or is private" }, { status: 404 });
     }
-    return NextResponse.json({ error: message.slice(0, 200) }, { status: 500 });
+
+    if (err.code === "PERMISSION_ERROR" || err.message?.includes("Forbidden") || err.message?.includes("403")) {
+      return NextResponse.json(
+        {
+          error: "Forbidden: You don't have permission to access this playlist",
+          details: "Possible causes: playlist is private and not owned by connected account, missing scopes (need playlist-read-private, playlist-read-collaborative), or market restriction. Try with a playlist you own or a public playlist.",
+          provider: err.provider,
+          code: err.code,
+          help: "For Spotify: Ensure playlist is owned by connected account or is public/collaborative. Check scopes in Spotify Dashboard. For YouTube: Ensure playlist is owned by connected YouTube account (mine=true).",
+        },
+        { status: 403 }
+      );
+    }
+
+    if (err.code === "AUTHENTICATION_ERROR") {
+      return NextResponse.json({ error: "Authentication failed, please reconnect account" }, { status: 401 });
+    }
+
+    if (err.code === "RATE_LIMIT") {
+      return NextResponse.json(
+        { error: `Rate limited, retry after ${err.retryAfterMs || "unknown"}ms`, retryAfterMs: err.retryAfterMs },
+        { status: 429 }
+      );
+    }
+
+    // Safe error - no tokens, but include message for debugging
+    const message = err instanceof Error ? err.message : "Failed to get playlist tracks";
+    return NextResponse.json({ error: message.slice(0, 300) }, { status: 500 });
   }
 }
