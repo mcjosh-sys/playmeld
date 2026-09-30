@@ -1,0 +1,15 @@
+# ngrok config example
+# DO NOT commit ngrok.yml with authtoken
+# Use env var NGROK_AUTHTOKEN or place token in ~/.config/ngrok/ngrok.yml
+# Canonical PlayMeld hostname: intensely-actual-chipmunk.ngrok-free.app
+
+version: "2"
+authtoken: ${NGROK_AUTHTOKEN}
+
+tunnels:
+  playmeld:
+    proto: http
+    addr: 3000
+    domain: intensely-actual-chipmunk.ngrok-free.app
+    # For OAuth callbacks, ensure https
+    # Inspect traffic: http://localhost:4040
