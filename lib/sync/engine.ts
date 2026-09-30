@@ -284,7 +284,25 @@ export class SyncEngine {
           });
           finalDestinationPlaylistId = newPlaylist.providerPlaylistId;
           finalDestinationPlaylistUrl = newPlaylist.url;
-        } catch (err) {
+        } catch (err: any) {
+          // Handle permission errors for create playlist with helpful guidance
+          if (err.code === "PERMISSION_ERROR" || err.message?.includes("Forbidden") || err.message?.includes("403")) {
+            const providerName = destinationProvider.name;
+            const isSpotify = providerName === "spotify";
+            
+            if (isSpotify) {
+              console.error(`[Engine] Create playlist 403 Forbidden for Spotify destination - likely missing playlist-modify scopes. Token may have old scopes without playlist-modify-public/private. Need to disconnect and reconnect Spotify destination account.`);
+              
+              // Enhance error message with helpful guidance
+              const enhancedError = new Error(
+                `Forbidden creating playlist on ${providerName}: ${err.message} | Spotify requires playlist-modify-public (for public) and playlist-modify-private (for private) scopes. Your destination account token may have old scopes without these. Fix: Go to /dashboard/connections -> Disconnect Spotify destination account -> Reconnect Spotify (will request playlist-modify-public, playlist-modify-private with offline access). Then retry sync.`
+              );
+              (enhancedError as any).code = err.code;
+              (enhancedError as any).provider = err.provider;
+              (enhancedError as any).retryable = false;
+              throw enhancedError;
+            }
+          }
           throw err;
         }
       }
@@ -317,14 +335,24 @@ export class SyncEngine {
               }
             }
           }
-        } catch (err) {
+        } catch (err: any) {
           // Partial failure: some tracks may have been added before failure
           // We should not erase successful progress
           if (err instanceof ProviderError && err.retryable) {
             throw err;
           }
-          // For non-retryable, mark remaining as failed but keep added count
-          const errorMessage = err instanceof Error ? err.message : "Failed to add tracks";
+
+          // Handle permission errors for addTracks with helpful guidance
+          let errorMessage = err instanceof Error ? err.message : "Failed to add tracks";
+          
+          if (err.code === "PERMISSION_ERROR" || errorMessage.includes("Forbidden") || errorMessage.includes("403")) {
+            const providerName = destinationProvider.name;
+            if (providerName === "spotify") {
+              errorMessage = `Forbidden adding tracks to ${providerName}: ${errorMessage} | Spotify requires playlist-modify-public/private scopes for destination. Your destination token may have old scopes. Fix: Disconnect and reconnect Spotify destination account in /dashboard/connections to get new scopes with offline access.`;
+              console.error(`[Engine] Add tracks 403 Forbidden for Spotify - missing playlist-modify scopes, need reconnect`);
+            }
+          }
+
           // Mark all matched not yet added as failed
           for (const result of trackResults) {
             if (result.status === "matched") {
@@ -334,6 +362,16 @@ export class SyncEngine {
               failedTracks++;
             }
           }
+
+          // Enhance error with guidance
+          if (err.code === "PERMISSION_ERROR") {
+            const enhancedError = new Error(errorMessage);
+            (enhancedError as any).code = err.code;
+            (enhancedError as any).provider = err.provider;
+            (enhancedError as any).retryable = false;
+            throw enhancedError;
+          }
+
           throw err;
         }
       } else {

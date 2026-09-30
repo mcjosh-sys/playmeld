@@ -567,9 +567,31 @@ export class SpotifyProvider implements MusicProvider {
   }
 
   async createPlaylist(accessToken: string, input: CreatePlaylistInput): Promise<NormalizedPlaylist> {
-    // Need current user id
-    const me = await this.getCurrentUser(accessToken);
-    const res = await spotifyFetch(accessToken, `/users/${encodeURIComponent(me.providerAccountId)}/playlists`, {
+    // Use current recommended endpoint POST /me/playlists per Spotify docs
+    // Old endpoint POST /users/{user_id}/playlists is deprecated
+    // Scopes required: playlist-modify-public for public, playlist-modify-private for private
+    // If 403, likely missing scopes - need to reconnect with new scopes
+
+    const tryCreate = async (useMeEndpoint: boolean): Promise<Response> => {
+      const endpoint = useMeEndpoint ? "/me/playlists" : `/users/me/playlists`;
+      // Actually /me/playlists is correct per docs, /users/{id}/playlists also works but we try /me first
+      const url = useMeEndpoint ? "/me/playlists" : `/users/${encodeURIComponent((await this.getCurrentUser(accessToken)).providerAccountId)}/playlists`;
+      
+      console.log(`[Spotify] Creating playlist with endpoint ${url}, name: ${input.name}, public: ${input.isPublic}, collaborative: ${input.isCollaborative}`);
+
+      return spotifyFetch(accessToken, url, {
+        method: "POST",
+        body: JSON.stringify({
+          name: input.name,
+          description: input.description || "",
+          public: input.isPublic ?? false,
+          collaborative: input.isCollaborative ?? false,
+        }),
+      });
+    };
+
+    // Try /me/playlists first (current docs)
+    let res = await spotifyFetch(accessToken, "/me/playlists", {
       method: "POST",
       body: JSON.stringify({
         name: input.name,
@@ -579,12 +601,58 @@ export class SpotifyProvider implements MusicProvider {
       }),
     });
 
+    if (!res.ok && res.status === 403) {
+      const body = await res.text();
+      console.warn(`[Spotify] Create playlist 403 with /me/playlists, trying /users/{id}/playlists fallback. Body: ${body.slice(0, 300)}`);
+      
+      // Fallback to /users/{id}/playlists
+      try {
+        const me = await this.getCurrentUser(accessToken);
+        const fallbackRes = await spotifyFetch(accessToken, `/users/${encodeURIComponent(me.providerAccountId)}/playlists`, {
+          method: "POST",
+          body: JSON.stringify({
+            name: input.name,
+            description: input.description || "",
+            public: input.isPublic ?? false,
+            collaborative: input.isCollaborative ?? false,
+          }),
+        });
+
+        if (fallbackRes.ok) {
+          console.log(`[Spotify] Create playlist fallback SUCCESS with /users/{id}/playlists`);
+          res = fallbackRes;
+        } else {
+          const fallbackBody = await fallbackRes.text();
+          console.error(`[Spotify] Create playlist fallback also 403: ${fallbackBody.slice(0, 500)}`);
+          // Throw original error with better message
+          throw translateHttpError("spotify", res.status, body, Object.fromEntries(res.headers.entries()));
+        }
+      } catch (fallbackErr: any) {
+        if (fallbackErr.code) throw fallbackErr;
+        const body = await res.text().catch(() => "");
+        throw translateHttpError("spotify", 403, body, {});
+      }
+    }
+
     if (!res.ok) {
       const body = await res.text();
+      console.error(`[Spotify] Create playlist failed ${res.status}: ${body.slice(0, 500)}`);
+      
+      // Provide better error for 403 missing scopes
+      if (res.status === 403) {
+        console.error(`[Spotify] Create playlist 403 - likely missing scopes playlist-modify-public/private. Token may have old scopes. Need to disconnect and reconnect Spotify.`);
+      }
+      
       throw translateHttpError("spotify", res.status, body, Object.fromEntries(res.headers.entries()));
     }
 
-    const data = (await res.json()) as SpotifyPlaylist;
+    let data: any;
+    try {
+      data = await res.json();
+    } catch {
+      throw new ProviderTransientError("spotify", "Invalid JSON from Spotify create playlist");
+    }
+
     return mapSpotifyPlaylistToNormalized(data);
   }
 
