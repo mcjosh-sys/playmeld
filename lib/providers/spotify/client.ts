@@ -120,7 +120,7 @@ interface SpotifyPlaylist {
   description?: string;
   owner: { id: string; display_name?: string };
   images?: { url: string }[];
-  tracks: { total: number };
+  items: { total: number };
   public: boolean | null;
   collaborative: boolean;
   external_urls: { spotify: string };
@@ -169,7 +169,7 @@ function mapSpotifyPlaylistToNormalized(p: SpotifyPlaylist, provider: ProviderNa
     ownerName: p.owner?.display_name || p.owner?.id || "Unknown",
     ownerId: p.owner?.id,
     imageUrl: p.images?.[0]?.url,
-    trackCount: p.tracks?.total ?? 0,
+    trackCount: p.items?.total ?? 0,
     isPublic: p.public ?? undefined,
     isCollaborative: p.collaborative ?? false,
     url: p.external_urls?.spotify,
@@ -338,7 +338,7 @@ export class SpotifyProvider implements MusicProvider {
         total: 0,
       };
     }
-
+    console.log("[Spotify] Fetched playlists", JSON.stringify(data, null, 2));
     const items = data.items || [];
     const playlists = items.map((p: any) => {
       try {
@@ -422,7 +422,7 @@ export class SpotifyProvider implements MusicProvider {
       });
       if (withMarket) params.set("market", "from_token");
 
-      const url = `/playlists/${encodeURIComponent(playlistId)}/tracks?${params.toString()}`;
+      const url = `/playlists/${encodeURIComponent(playlistId)}/items?${params.toString()}`;
       console.log(`[Spotify] Fetching playlist tracks ${playlistId} withMarket=${withMarket}, url: ${url}, offset: ${offset}`);
 
       return spotifyFetch(accessToken, url);
@@ -435,32 +435,32 @@ export class SpotifyProvider implements MusicProvider {
     if (!res.ok && res.status === 403) {
       lastBody = await res.text();
       console.warn(`[Spotify] Playlist tracks ${playlistId} 403 with market=from_token, retrying without market. Body: ${lastBody.slice(0, 300)}`);
-      
+
       res = await tryFetch(false);
-      
+
       if (!res.ok) {
         lastBody = await res.text();
         console.error(`[Spotify] Playlist tracks ${playlistId} still 403 without market with user token. Body: ${lastBody.slice(0, 500)}`);
-        
+
         // For public playlists not owned, try client credentials token as fallback
         // Per Spotify docs, Get Playlist Items only allows owned/collaborative with user token, but client credentials can access public playlists
         console.log(`[Spotify] Trying client credentials fallback for public playlist ${playlistId}`);
         try {
           const ccToken = await getClientCredentialsToken();
-          
+
           const tryFetchCC = async (withMarket: boolean): Promise<Response> => {
             const params = new URLSearchParams({
               limit: Math.min(limit, 100).toString(),
               offset: offset.toString(),
             });
             if (withMarket) params.set("market", "from_token");
-            const url = `/playlists/${encodeURIComponent(playlistId)}/tracks?${params.toString()}`;
+            const url = `/playlists/${encodeURIComponent(playlistId)}/items?${params.toString()}`;
             console.log(`[Spotify] CC fallback fetching ${playlistId} withMarket=${withMarket}`);
             return spotifyFetch(ccToken, url);
           };
 
           let ccRes = await tryFetchCC(false);
-          
+
           if (!ccRes.ok && ccRes.status === 403) {
             ccRes = await tryFetchCC(true);
           }
@@ -509,7 +509,7 @@ export class SpotifyProvider implements MusicProvider {
     const items = data.items || [];
 
     const tracks = items
-      .map((item: any) => item.track)
+      .map((item: any) => item.item)
       .filter((t: any): t is SpotifyTrack => t !== null && t !== undefined && t.id !== null && t.id !== undefined)
       .map((t: any) => {
         try {
@@ -576,7 +576,7 @@ export class SpotifyProvider implements MusicProvider {
       const endpoint = useMeEndpoint ? "/me/playlists" : `/users/me/playlists`;
       // Actually /me/playlists is correct per docs, /users/{id}/playlists also works but we try /me first
       const url = useMeEndpoint ? "/me/playlists" : `/users/${encodeURIComponent((await this.getCurrentUser(accessToken)).providerAccountId)}/playlists`;
-      
+
       console.log(`[Spotify] Creating playlist with endpoint ${url}, name: ${input.name}, public: ${input.isPublic}, collaborative: ${input.isCollaborative}`);
 
       return spotifyFetch(accessToken, url, {
@@ -604,7 +604,7 @@ export class SpotifyProvider implements MusicProvider {
     if (!res.ok && res.status === 403) {
       const body = await res.text();
       console.warn(`[Spotify] Create playlist 403 with /me/playlists, trying /users/{id}/playlists fallback. Body: ${body.slice(0, 300)}`);
-      
+
       // Fallback to /users/{id}/playlists
       try {
         const me = await this.getCurrentUser(accessToken);
@@ -637,12 +637,12 @@ export class SpotifyProvider implements MusicProvider {
     if (!res.ok) {
       const body = await res.text();
       console.error(`[Spotify] Create playlist failed ${res.status}: ${body.slice(0, 500)}`);
-      
+
       // Provide better error for 403 missing scopes
       if (res.status === 403) {
         console.error(`[Spotify] Create playlist 403 - likely missing scopes playlist-modify-public/private. Token may have old scopes. Need to disconnect and reconnect Spotify.`);
       }
-      
+
       throw translateHttpError("spotify", res.status, body, Object.fromEntries(res.headers.entries()));
     }
 
