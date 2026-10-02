@@ -11,26 +11,22 @@
  */
 
 import {
-  MusicProvider,
-  ProviderCapabilities,
-  NormalizedTrack,
-  NormalizedPlaylist,
-  PlaylistPage,
-  TrackPage,
-  SearchQuery,
-  CreatePlaylistInput,
-  ProviderUser,
-  ProviderName,
-} from "../types";
-import {
   ProviderAuthenticationError,
-  ProviderPermissionError,
-  ProviderNotFoundError,
-  ProviderRateLimitError,
   ProviderTransientError,
-  ProviderUnsupportedOperationError,
-  translateHttpError,
+  translateHttpError
 } from "../errors";
+import {
+  CreatePlaylistInput,
+  MusicProvider,
+  NormalizedPlaylist,
+  NormalizedTrack,
+  PlaylistPage,
+  ProviderCapabilities,
+  ProviderName,
+  ProviderUser,
+  SearchQuery,
+  TrackPage,
+} from "../types";
 
 const SPOTIFY_API_BASE = "https://api.spotify.com/v1";
 const SPOTIFY_AUTH_BASE = "https://accounts.spotify.com";
@@ -338,7 +334,6 @@ export class SpotifyProvider implements MusicProvider {
         total: 0,
       };
     }
-    console.log("[Spotify] Fetched playlists", JSON.stringify(data, null, 2));
     const items = data.items || [];
     const playlists = items.map((p: any) => {
       try {
@@ -669,7 +664,7 @@ export class SpotifyProvider implements MusicProvider {
       const body: Record<string, unknown> = { uris };
       if (position !== undefined) body.position = position;
 
-      const res = await spotifyFetch(accessToken, `/playlists/${encodeURIComponent(playlistId)}/tracks`, {
+      const res = await spotifyFetch(accessToken, `/playlists/${encodeURIComponent(playlistId)}/items`, {
         method: "POST",
         body: JSON.stringify(body),
       });
@@ -688,7 +683,7 @@ export class SpotifyProvider implements MusicProvider {
 
   async removeTracks(accessToken: string, playlistId: string, trackIds: string[]): Promise<void> {
     const uris = trackIds.map((id) => ({ uri: `spotify:track:${id}` }));
-    const res = await spotifyFetch(accessToken, `/playlists/${encodeURIComponent(playlistId)}/tracks`, {
+    const res = await spotifyFetch(accessToken, `/playlists/${encodeURIComponent(playlistId)}/items`, {
       method: "DELETE",
       body: JSON.stringify({ tracks: uris }),
     });

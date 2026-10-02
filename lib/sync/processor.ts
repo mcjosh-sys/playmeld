@@ -11,15 +11,97 @@ import { neon } from "@neondatabase/serverless";
 import { eq, and } from "drizzle-orm";
 import * as schema from "@/db/schema";
 import { getProvider } from "@/lib/providers/factory";
-import { decryptToken } from "@/lib/encryption";
+import { decryptToken, encryptToken } from "@/lib/encryption";
 import { SyncEngine } from "@/lib/sync/engine";
-import { ProviderError } from "@/lib/providers/errors";
+import { ProviderError, ProviderAuthenticationError } from "@/lib/providers/errors";
+import { MusicProvider } from "@/lib/providers/types";
 import { getPlanLimits } from "@/lib/billing/plans";
 
 function getDb() {
   if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL not set");
   const sql = neon(process.env.DATABASE_URL);
   return drizzle(sql, { schema });
+}
+
+/**
+ * Check if an access token is expired (or about to expire) and refresh it if needed.
+ * Google OAuth2 access tokens typically expire after 1 hour.
+ * Returns a valid access token, refreshing and persisting new tokens to DB if necessary.
+ */
+async function ensureFreshToken(
+  db: ReturnType<typeof getDb>,
+  account: typeof schema.connectedAccounts.$inferSelect,
+  provider: MusicProvider & { refreshAccessToken?: (refreshToken: string) => Promise<{ accessToken: string; expiresIn: number; refreshToken?: string }> }
+): Promise<string> {
+  const currentToken = decryptToken(account.accessTokenEncrypted);
+
+  // Check if token is expired or will expire within 5 minutes
+  const bufferMs = 5 * 60 * 1000; // 5 minute buffer
+  const now = Date.now();
+  const expiresAt = account.tokenExpiresAt ? new Date(account.tokenExpiresAt).getTime() : null;
+
+  if (expiresAt && expiresAt - now > bufferMs) {
+    // Token is still fresh
+    return currentToken;
+  }
+
+  // Token is expired or expiry unknown — try to refresh
+  if (!account.refreshTokenEncrypted) {
+    console.warn(`[Token] No refresh token for account ${account.id} (${account.provider}), using existing access token`);
+    return currentToken;
+  }
+
+  if (!provider.refreshAccessToken) {
+    console.warn(`[Token] Provider ${account.provider} does not support token refresh, using existing access token`);
+    return currentToken;
+  }
+
+  const refreshToken = decryptToken(account.refreshTokenEncrypted);
+
+  try {
+    console.log(`[Token] Refreshing expired access token for account ${account.id} (${account.provider})`);
+    const refreshed = await provider.refreshAccessToken(refreshToken);
+
+    // Persist new tokens to DB
+    const updates: Record<string, any> = {
+      accessTokenEncrypted: encryptToken(refreshed.accessToken),
+      tokenExpiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
+      updatedAt: new Date(),
+    };
+
+    // Some providers return a new refresh token (Google sometimes does on re-grant)
+    if (refreshed.refreshToken) {
+      updates.refreshTokenEncrypted = encryptToken(refreshed.refreshToken);
+    }
+
+    await db
+      .update(schema.connectedAccounts)
+      .set(updates)
+      .where(eq(schema.connectedAccounts.id, account.id));
+
+    console.log(`[Token] Successfully refreshed token for account ${account.id} (${account.provider}), new expiry: ${updates.tokenExpiresAt.toISOString()}`);
+    return refreshed.accessToken;
+  } catch (err) {
+    // If refresh fails with auth error, the refresh token itself is invalid
+    if (err instanceof ProviderAuthenticationError) {
+      console.error(`[Token] Refresh token invalid for account ${account.id} (${account.provider}). User must reconnect.`);
+      // Mark the account as needing reconnection
+      await db
+        .update(schema.connectedAccounts)
+        .set({
+          isActive: false,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.connectedAccounts.id, account.id));
+      throw new Error(
+        `${account.provider} authentication expired for account "${account.displayName || account.providerAccountId}". Please reconnect this account in /dashboard/connections.`
+      );
+    }
+
+    // For transient errors, fall back to existing token (it might still work)
+    console.warn(`[Token] Failed to refresh token for account ${account.id} (${account.provider}), using existing token:`, err instanceof Error ? err.message : err);
+    return currentToken;
+  }
 }
 
 export interface ProcessResult {
@@ -125,11 +207,12 @@ export async function processSyncJobDirect(
     .returning();
 
   try {
-    let sourceToken = decryptToken(sourceAccount.accessTokenEncrypted);
-    let destToken = decryptToken(destAccount.accessTokenEncrypted);
-
     const sourceProvider = getProvider(sourceAccount.provider as any);
     const destProvider = getProvider(destAccount.provider as any);
+
+    // Refresh expired tokens before use (Google tokens expire after ~1 hour)
+    let sourceToken = await ensureFreshToken(db, sourceAccount, sourceProvider);
+    let destToken = await ensureFreshToken(db, destAccount, destProvider);
 
     const engine = new SyncEngine(70, 60);
 
@@ -211,7 +294,7 @@ export async function processSyncJobDirect(
         processedTracks: result.summary.total,
         completedAt: new Date(),
         updatedAt: new Date(),
-        errorMessage: result.error,
+        errorMessage: result.error || null,
       })
       .where(eq(schema.syncJobs.id, syncJobId));
 
@@ -220,7 +303,7 @@ export async function processSyncJobDirect(
       .set({
         status: result.status as any,
         completedAt: new Date(),
-        errorMessage: result.error,
+        errorMessage: result.error || null,
         metadata: {
           summary: result.summary,
           destinationPlaylistId: result.destinationPlaylistId,

@@ -47,3 +47,5 @@ drizzle/
 .ngrok/
 ngrok.yml
 ngrok.log
+
+bun.lock
