@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Music, Link2, Shield, AlertCircle, CheckCircle, Youtube } from "lucide-react";
+import { Music, Link2, Shield, AlertCircle, CheckCircle, Youtube, XCircle } from "lucide-react";
 import { ConnectButton } from "@/components/connections/connect-button";
 import { DisconnectButton } from "@/components/connections/disconnect-button";
 
@@ -86,8 +86,8 @@ export default async function ConnectionsPage({
                 <Link2 className="w-5 h-5 text-primary" aria-hidden="true" />
               </div>
               <div>
-                <div className="text-2xl font-bold tabular-nums">{accounts.length}</div>
-                <div className="text-xs text-muted-foreground">Connected</div>
+                <div className="text-2xl font-bold tabular-nums">{accounts.filter(a => a.isActive).length}</div>
+                <div className="text-xs text-muted-foreground">Active Connected</div>
               </div>
             </div>
           </CardContent>
@@ -99,8 +99,8 @@ export default async function ConnectionsPage({
                 <Music className="w-5 h-5 text-[#1DB954]" aria-hidden="true" />
               </div>
               <div>
-                <div className="text-2xl font-bold tabular-nums">{spotifyAccounts.length}</div>
-                <div className="text-xs text-muted-foreground">Spotify</div>
+                <div className="text-2xl font-bold tabular-nums">{spotifyAccounts.filter(a => a.isActive).length}</div>
+                <div className="text-xs text-muted-foreground">Spotify Active</div>
               </div>
             </div>
           </CardContent>
@@ -112,8 +112,8 @@ export default async function ConnectionsPage({
                 <Youtube className="w-5 h-5 text-[#FF0000]" aria-hidden="true" />
               </div>
               <div>
-                <div className="text-2xl font-bold tabular-nums">{youtubeAccounts.length}</div>
-                <div className="text-xs text-muted-foreground">YouTube Music</div>
+                <div className="text-2xl font-bold tabular-nums">{youtubeAccounts.filter(a => a.isActive).length}</div>
+                <div className="text-xs text-muted-foreground">YouTube Active</div>
               </div>
             </div>
           </CardContent>
@@ -126,7 +126,7 @@ export default async function ConnectionsPage({
               </div>
               <div>
                 <div className="text-sm font-medium">Encrypted</div>
-                <div className="text-xs text-muted-foreground">AES-256-GCM</div>
+                <div className="text-xs text-muted-foreground">AES-256-GCM at rest</div>
               </div>
             </div>
           </CardContent>
@@ -147,28 +147,46 @@ export default async function ConnectionsPage({
                   <CardDescription className="text-xs">Connect your Spotify account</CardDescription>
                 </div>
               </div>
-              <Badge variant={spotifyAccounts.length > 0 ? "success" : "outline"}>
-                {spotifyAccounts.length > 0 ? `${spotifyAccounts.length} connected` : "Not connected"}
+              <Badge variant={spotifyAccounts.filter(a => a.isActive).length > 0 ? "success" : "outline"}>
+                {spotifyAccounts.filter(a => a.isActive).length > 0 ? `${spotifyAccounts.filter(a => a.isActive).length} active` : "Not connected"}
               </Badge>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {spotifyAccounts.length === 0 ? (
+            {spotifyAccounts.filter(a => a.isActive).length === 0 ? (
               <div className="space-y-4">
                 <div className="p-4 rounded-xl bg-muted/50 border border-dashed text-center space-y-3">
                   <div className="mx-auto w-12 h-12 rounded-xl bg-muted flex items-center justify-center">
                     <Music className="w-6 h-6 text-muted-foreground" aria-hidden="true" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium">No Spotify account connected</p>
+                    <p className="text-sm font-medium">No active Spotify account</p>
                     <p className="text-xs text-muted-foreground mt-1">Connect to start syncing playlists with smart matching (ISRC + metadata)</p>
                   </div>
                   <ConnectButton provider="spotify" label="Connect Spotify" size="default" />
                 </div>
+                {spotifyAccounts.filter(a => !a.isActive).length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground">Inactive/Disconnected accounts:</p>
+                    {spotifyAccounts.filter(a => !a.isActive).map((acc) => (
+                      <div key={acc.id} className="border border-dashed p-3 rounded-xl flex justify-between items-center bg-muted/20">
+                        <div className="flex gap-2 min-w-0 flex-1">
+                          <XCircle className="w-4 h-4 text-muted-foreground flex-shrink-0 mt-1" aria-hidden="true" />
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium text-sm truncate">{acc.displayName || acc.providerAccountId}</div>
+                            <div className="text-xs text-muted-foreground">Disconnected • Tokens cleared • {acc.providerAccountEmail || ""}</div>
+                            <Badge variant="secondary" className="text-[10px] mt-1">Inactive</Badge>
+                          </div>
+                        </div>
+                        <ConnectButton provider="spotify" label="Reconnect" variant="outline" size="sm" className="ml-2" />
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="space-y-3">
-                {spotifyAccounts.map((acc) => (
+                {spotifyAccounts.filter(a => a.isActive).map((acc) => (
                   <div key={acc.id} className="border p-4 rounded-xl space-y-3 hover:bg-accent/30 transition-colors">
                     <div className="flex justify-between items-center gap-3">
                       <div className="flex gap-3 min-w-0 flex-1">
@@ -178,13 +196,11 @@ export default async function ConnectionsPage({
                         <div className="min-w-0 flex-1">
                           <div className="font-medium truncate flex items-center gap-2">
                             {acc.displayName || acc.providerAccountId}
-                            {acc.isActive && <CheckCircle className="w-4 h-4 text-accent" aria-hidden="true" />}
+                            <CheckCircle className="w-4 h-4 text-accent" aria-hidden="true" />
                           </div>
                           <div className="text-xs text-muted-foreground truncate">{acc.providerAccountEmail || acc.providerAccountId}</div>
                           <div className="flex gap-2 mt-1">
-                            <Badge variant={acc.isActive ? "success" : "secondary"} className="text-[10px]">
-                              {acc.isActive ? "Active" : "Inactive"}
-                            </Badge>
+                            <Badge variant="success" className="text-[10px]">Active</Badge>
                             {acc.product && <Badge variant="outline" className="text-[10px]">{acc.product}</Badge>}
                           </div>
                         </div>
@@ -200,13 +216,32 @@ export default async function ConnectionsPage({
                     </div>
                   </div>
                 ))}
+                {spotifyAccounts.filter(a => !a.isActive).length > 0 && (
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-muted-foreground hover:text-foreground">Show {spotifyAccounts.filter(a => !a.isActive).length} inactive account(s)</summary>
+                    <div className="mt-2 space-y-2">
+                      {spotifyAccounts.filter(a => !a.isActive).map((acc) => (
+                        <div key={acc.id} className="border border-dashed p-3 rounded-xl flex justify-between items-center bg-muted/20">
+                          <div className="flex gap-2">
+                            <XCircle className="w-4 h-4 text-muted-foreground mt-1" aria-hidden="true" />
+                            <div>
+                              <div className="font-medium text-sm">{acc.displayName || acc.providerAccountId}</div>
+                              <div className="text-xs text-muted-foreground">Inactive • Tokens cleared</div>
+                            </div>
+                          </div>
+                          <ConnectButton provider="spotify" label="Reconnect" variant="outline" size="sm" />
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
                 <ConnectButton provider="spotify" label="Connect another Spotify account" variant="outline" size="sm" className="w-full" />
               </div>
             )}
           </CardContent>
         </Card>
 
-        {/* YouTube Music - Newly Supported */}
+        {/* YouTube Music */}
         <Card className="animate-enter stagger-3 hover:shadow-glow-accent transition-all duration-300 border-[#FF0000]/20">
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -219,44 +254,45 @@ export default async function ConnectionsPage({
                   <CardDescription className="text-xs">Via YouTube Data API v3</CardDescription>
                 </div>
               </div>
-              <Badge variant={youtubeAccounts.length > 0 ? "success" : "outline"}>
-                {youtubeAccounts.length > 0 ? `${youtubeAccounts.length} connected` : "Not connected"}
+              <Badge variant={youtubeAccounts.filter(a => a.isActive).length > 0 ? "success" : "outline"}>
+                {youtubeAccounts.filter(a => a.isActive).length > 0 ? `${youtubeAccounts.filter(a => a.isActive).length} active` : "Not connected"}
               </Badge>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {youtubeAccounts.length === 0 ? (
+            {youtubeAccounts.filter(a => a.isActive).length === 0 ? (
               <div className="space-y-4">
                 <div className="p-4 rounded-xl bg-muted/50 border border-dashed text-center space-y-3">
                   <div className="mx-auto w-12 h-12 rounded-xl bg-[#FF0000]/10 flex items-center justify-center">
                     <Youtube className="w-6 h-6 text-[#FF0000]" aria-hidden="true" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium">No YouTube account connected</p>
-                    <p className="text-xs text-muted-foreground mt-1">Connect YouTube to sync playlists. Uses YouTube Data API - playlists appear in YouTube Music.</p>
+                    <p className="text-sm font-medium">No active YouTube account</p>
+                    <p className="text-xs text-muted-foreground mt-1">Connect YouTube to sync playlists. Playlists appear in YouTube Music.</p>
                   </div>
                   <ConnectButton provider="youtube_music" label="Connect YouTube" size="default" />
                 </div>
-
-                <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 space-y-2">
-                  <div className="flex gap-2">
-                    <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
-                    <div className="text-xs space-y-1">
-                      <p className="font-medium text-red-900 dark:text-red-100">YouTube Music setup:</p>
-                      <p className="text-red-700 dark:text-red-300">• Enable YouTube Data API v3 in Google Cloud Console</p>
-                      <p className="text-red-700 dark:text-red-300">• Add YouTube scopes to OAuth consent screen: youtube, youtube.readonly</p>
-                      <p className="text-red-700 dark:text-red-300">• Redirect URI:</p>
-                      <p className="font-mono text-[11px] bg-white/50 dark:bg-black/20 p-1 rounded break-all">https://intensely-actual-chipmunk.ngrok-free.app/api/connected-accounts/callback/youtube_music</p>
-                      <p className="text-red-700 dark:text-red-300 mt-1">• Env: YOUTUBE_CLIENT_ID/SECRET or uses GOOGLE_CLIENT_ID/SECRET fallback</p>
-                      <p className="text-red-700 dark:text-red-300">• Quota: 10k units/day default, 1 insert = 50 units, search = 100 units</p>
-                      <p className="text-red-700 dark:text-red-300">• Note: Search returns videos, not ISRC - confidence lower, no ISRC matching</p>
-                    </div>
+                {youtubeAccounts.filter(a => !a.isActive).length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground">Inactive accounts:</p>
+                    {youtubeAccounts.filter(a => !a.isActive).map((acc) => (
+                      <div key={acc.id} className="border border-dashed p-3 rounded-xl flex justify-between items-center bg-muted/20">
+                        <div className="flex gap-2">
+                          <XCircle className="w-4 h-4 text-muted-foreground mt-1" aria-hidden="true" />
+                          <div>
+                            <div className="font-medium text-sm">{acc.displayName || acc.providerAccountId}</div>
+                            <div className="text-xs text-muted-foreground">Inactive • Tokens cleared</div>
+                          </div>
+                        </div>
+                        <ConnectButton provider="youtube_music" label="Reconnect" variant="outline" size="sm" />
+                      </div>
+                    ))}
                   </div>
-                </div>
+                )}
               </div>
             ) : (
               <div className="space-y-3">
-                {youtubeAccounts.map((acc) => (
+                {youtubeAccounts.filter(a => a.isActive).map((acc) => (
                   <div key={acc.id} className="border p-4 rounded-xl space-y-3 hover:bg-accent/30 transition-colors">
                     <div className="flex justify-between items-center gap-3">
                       <div className="flex gap-3 min-w-0 flex-1">
@@ -266,13 +302,11 @@ export default async function ConnectionsPage({
                         <div className="min-w-0 flex-1">
                           <div className="font-medium truncate flex items-center gap-2">
                             {acc.displayName || acc.providerAccountId}
-                            {acc.isActive && <CheckCircle className="w-4 h-4 text-accent" aria-hidden="true" />}
+                            <CheckCircle className="w-4 h-4 text-accent" aria-hidden="true" />
                           </div>
                           <div className="text-xs text-muted-foreground truncate">{acc.providerAccountEmail || acc.providerAccountId}</div>
                           <div className="flex gap-2 mt-1">
-                            <Badge variant={acc.isActive ? "success" : "secondary"} className="text-[10px]">
-                              {acc.isActive ? "Active" : "Inactive"}
-                            </Badge>
+                            <Badge variant="success" className="text-[10px]">Active</Badge>
                             <Badge variant="outline" className="text-[10px]">YouTube</Badge>
                           </div>
                         </div>
@@ -288,6 +322,25 @@ export default async function ConnectionsPage({
                     </div>
                   </div>
                 ))}
+                {youtubeAccounts.filter(a => !a.isActive).length > 0 && (
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-muted-foreground">Show {youtubeAccounts.filter(a => !a.isActive).length} inactive</summary>
+                    <div className="mt-2 space-y-2">
+                      {youtubeAccounts.filter(a => !a.isActive).map((acc) => (
+                        <div key={acc.id} className="border border-dashed p-3 rounded-xl flex justify-between items-center bg-muted/20">
+                          <div className="flex gap-2">
+                            <XCircle className="w-4 h-4 text-muted-foreground mt-1" aria-hidden="true" />
+                            <div>
+                              <div className="font-medium text-sm">{acc.displayName || acc.providerAccountId}</div>
+                              <div className="text-xs text-muted-foreground">Inactive</div>
+                            </div>
+                          </div>
+                          <ConnectButton provider="youtube_music" label="Reconnect" variant="outline" size="sm" />
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
                 <ConnectButton provider="youtube_music" label="Connect another YouTube account" variant="outline" size="sm" className="w-full" />
               </div>
             )}
@@ -361,11 +414,11 @@ export default async function ConnectionsPage({
             </div>
             <div className="flex gap-2">
               <CheckCircle className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" aria-hidden="true" />
-              <span className="text-xs">YouTube quota handling: 403 quotaExceeded throws RateLimitError retryable to BullMQ</span>
+              <span className="text-xs">Disconnect marks inactive and clears tokens (DISCONNECTED), preserves history, no background bleed via modal</span>
             </div>
             <div className="flex gap-2">
               <CheckCircle className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" aria-hidden="true" />
-              <span className="text-xs">Pagination: Spotify offset, YouTube pageToken, both handle empty/one-page/multi-page/error</span>
+              <span className="text-xs">Inactive accounts show Reconnect button, not Disconnect - fixed UI</span>
             </div>
           </div>
         </CardContent>
