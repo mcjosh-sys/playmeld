@@ -10,12 +10,6 @@
       "maxDuration": 10
     }
   },
-  "crons": [
-    {
-      "path": "/api/cron/process-pending-jobs",
-      "schedule": "*/5 * * * *"
-    }
-  ],
   "env": {
     "NEXT_TELEMETRY_DISABLED": "1"
   }
